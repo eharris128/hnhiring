@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HN Hiring Tracker</title>
+<style>
+  :root {
+    --bg: #11141a; --panel: #1a1f29; --panel2: #222937; --border: #2e3848;
+    --text: #d8dee9; --dim: #8b97a8; --accent: #ff9c41; --accent2: #5ec2ff;
+    --good: #5fd38a; --bad: #ff7a7a; --star: #ffd166;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  a { color: var(--accent2); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  header { position: sticky; top: 0; z-index: 10; background: var(--panel);
+           border-bottom: 1px solid var(--border); padding: 12px 20px; }
+  .bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+         max-width: 1100px; margin: 0 auto; }
+  .bar h1 { font-size: 17px; margin: 0; color: var(--accent); white-space: nowrap; }
+  .bar .meta { color: var(--dim); font-size: 12.5px; }
+  #search { flex: 1; min-width: 220px; background: var(--bg); color: var(--text);
+            border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 14px; }
+  #search:focus { outline: none; border-color: var(--accent2); }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+           border-radius: 8px; padding: 7px 14px; font-size: 13.5px; cursor: pointer; }
+  button:hover { border-color: var(--accent2); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #18120a; font-weight: 600; }
+
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; max-width: 1100px;
+             margin: 10px auto 0; }
+  .chip { border-radius: 999px; padding: 5px 13px; font-size: 13px; }
+  .chip.on { background: var(--accent2); border-color: var(--accent2); color: #0b1620; font-weight: 600; }
+
+  .tabs { display: flex; gap: 2px; flex-wrap: wrap; max-width: 1100px; margin: 10px auto 0; }
+  .tab { border: none; border-bottom: 2px solid transparent; background: none;
+         border-radius: 0; padding: 5px 11px; color: var(--dim); }
+  .tab.on { color: var(--text); border-bottom-color: var(--accent); }
+  .tab .n { color: var(--dim); font-size: 11.5px; margin-left: 4px; }
+
+  main { max-width: 1100px; margin: 18px auto; padding: 0 20px; }
+  #count { color: var(--dim); font-size: 13px; margin-bottom: 10px; }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+          padding: 14px 16px; margin-bottom: 12px; }
+  .card.fav { border-left: 3px solid var(--star); }
+  .card.archived { opacity: .5; }
+  .card-head { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+  .card-title { flex: 1; font-weight: 600; font-size: 14.5px; }
+  .acts { display: flex; gap: 2px; align-items: center; }
+  .star { background: none; border: none; font-size: 19px; padding: 0 4px; color: var(--dim); }
+  .star.on { color: var(--star); }
+  .act { background: none; border: 1px solid var(--border); border-radius: 8px;
+         width: 30px; height: 30px; padding: 0; font-size: 17px; line-height: 1;
+         color: var(--dim); }
+  .act.plus:hover { color: var(--good); border-color: var(--good); }
+  .act.x:hover { color: var(--bad); border-color: var(--bad); }
+  .badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px;
+           background: var(--panel2); color: var(--dim); border: 1px solid var(--border); }
+  .badge.remote { color: var(--good); border-color: var(--good); }
+  .badge.us { color: var(--accent2); border-color: var(--accent2); }
+  .badge.swiss { color: var(--accent); border-color: var(--accent); }
+  .card-meta { color: var(--dim); font-size: 12px; margin-top: 6px; }
+  .status-pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; margin-left: 8px;
+                 background: var(--panel2); border: 1px solid var(--border); color: var(--accent2); }
+
+  .card-body { display: none; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+  .card.open .card-body { display: block; }
+  .post { font-size: 14px; overflow-wrap: anywhere; }
+  .post p { margin: 8px 0; }
+  .controls { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+  select { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+           border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+  textarea { width: 100%; min-height: 70px; margin-top: 10px; background: var(--bg);
+             color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+             padding: 9px 12px; font: 13.5px/1.5 inherit; resize: vertical; }
+  textarea:focus { outline: none; border-color: var(--accent2); }
+  .saved { color: var(--good); font-size: 12px; opacity: 0; transition: opacity .3s; }
+  .saved.show { opacity: 1; }
+  .empty { color: var(--dim); text-align: center; padding: 60px 0; }
+
+  #zen-btn.on { background: var(--accent2); border-color: var(--accent2); color: #0b1620; font-weight: 600; }
+  .zen-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .zen-pos { font-weight: 600; min-width: 80px; text-align: center; font-variant-numeric: tabular-nums; }
+  .zen-keys { color: var(--dim); font-size: 12px; margin-left: auto; }
+  .zen-keys kbd { background: var(--panel2); border: 1px solid var(--border); border-radius: 4px;
+                  padding: 1px 5px; font-size: 11px; font-family: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>HN Hiring</h1>
+    <span class="meta" id="thread-meta">no data yet — hit Sync</span>
+    <input id="search" type="search" placeholder="Search company, tech, keywords…">
+    <button id="zen-btn" title="One card at a time (z)">Zen</button>
+    <button class="primary" id="sync-btn">Sync</button>
+  </div>
+  <div class="filters" id="filters">
+    <button class="chip" data-f="remote">Remote</button>
+    <button class="chip" data-f="us">US-based</button>
+    <button class="chip" data-f="swiss">Swiss-friendly</button>
+    <button class="chip" data-f="fav">★ Favorites</button>
+    <button class="chip" data-f="noted">Has notes</button>
+  </div>
+  <div class="tabs" id="tabs"></div>
+</header>
+
+<main>
+  <div id="count"></div>
+  <div id="list"></div>
+</main>
+
+<script>
+const STATUSES = ["all", "inbox", "interested", "applied", "interviewing", "offer", "rejected", "archived"];
+// Cards are expanded by default; `closed` remembers ones the user collapsed.
+// Zen mode shows one card at a time from the current filtered list.
+const state = { jobs: [], thread: null, q: "", filters: new Set(), tab: "all", closed: new Set(),
+                zen: false, zenIdx: 0 };
+
+// + bumps a post one step along the review pipeline.
+const NEXT_STAGE = { inbox: "interested", interested: "applied", applied: "interviewing",
+                     interviewing: "offer" };
+
+const $ = s => document.querySelector(s);
+const esc = s => { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; };
+const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+
+const isRemote = j => j.tags.includes("remote");
+const isUS = j => j.tags.includes("us");
+const isSwiss = j => j.tags.includes("switzerland") ||
+  (isRemote(j) && (j.tags.includes("europe") || j.tags.includes("worldwide")));
+
+async function load() {
+  const r = await fetch("/api/jobs");
+  const data = await r.json();
+  state.jobs = data.jobs;
+  state.thread = data.thread;
+  if (state.thread) {
+    const d = new Date(state.thread.last_synced * 1000);
+    $("#thread-meta").textContent =
+      `${state.thread.title} · ${state.jobs.length} posts · synced ${d.toLocaleString()}`;
+  }
+  render();
+}
+
+async function sync() {
+  const btn = $("#sync-btn");
+  btn.disabled = true; btn.textContent = "Syncing…";
+  try {
+    const r = await fetch("/api/sync", { method: "POST" });
+    if (!r.ok) throw new Error(await r.text());
+    await load();
+  } catch (e) {
+    alert("Sync failed: " + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "Sync";
+  }
+}
+
+async function patch(id, fields) {
+  await fetch(`/api/jobs/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+  const j = state.jobs.find(j => j.id === id);
+  Object.assign(j, fields);
+}
+
+function visible() {
+  const q = state.q.toLowerCase();
+  return state.jobs.filter(j => {
+    if (state.tab !== "all" && j.status !== state.tab) return false;
+    if (state.filters.has("remote") && !isRemote(j)) return false;
+    if (state.filters.has("us") && !isUS(j)) return false;
+    if (state.filters.has("swiss") && !isSwiss(j)) return false;
+    if (state.filters.has("fav") && !j.favorite) return false;
+    if (state.filters.has("noted") && !j.notes.trim()) return false;
+    if (q && !(j.text.toLowerCase().includes(q) || j.author.toLowerCase().includes(q)
+               || j.notes.toLowerCase().includes(q))) return false;
+    return true;
+  });
+}
+
+function renderTabs() {
+  const counts = {};
+  for (const j of state.jobs) counts[j.status] = (counts[j.status] || 0) + 1;
+  counts.all = state.jobs.length;
+  $("#tabs").innerHTML = STATUSES.map(s =>
+    `<button class="tab ${state.tab === s ? "on" : ""}" data-tab="${s}">
+       ${s[0].toUpperCase() + s.slice(1)}<span class="n">${counts[s] || 0}</span>
+     </button>`).join("");
+}
+
+function badgesFor(j) {
+  const b = [];
+  if (isRemote(j)) b.push('<span class="badge remote">remote</span>');
+  if (j.tags.includes("onsite")) b.push('<span class="badge">onsite/hybrid</span>');
+  if (isUS(j)) b.push('<span class="badge us">US</span>');
+  if (j.tags.includes("switzerland")) b.push('<span class="badge swiss">Switzerland</span>');
+  else if (isSwiss(j)) b.push('<span class="badge swiss">Swiss-friendly</span>');
+  if (j.tags.includes("europe")) b.push('<span class="badge">Europe</span>');
+  if (j.tags.includes("worldwide")) b.push('<span class="badge">worldwide</span>');
+  return b.join("");
+}
+
+function cardHTML(j, forceOpen = false) {
+  return `
+    <div class="card ${j.favorite ? "fav" : ""} ${j.status === "archived" ? "archived" : ""} ${forceOpen || !state.closed.has(j.id) ? "open" : ""}" data-id="${j.id}">
+      <div class="card-head">
+        <div style="flex:1">
+          <div class="card-title">${esc(j.title)}</div>
+          <div class="badges">${badgesFor(j)}</div>
+          <div class="card-meta">
+            ${esc(j.author)} · ${new Date(j.time * 1000).toLocaleDateString()}
+            · <a href="https://news.ycombinator.com/item?id=${j.id}" target="_blank" rel="noopener">HN ↗</a>
+            ${j.status !== "inbox" ? `<span class="status-pill">${j.status}</span>` : ""}
+            ${j.notes.trim() ? `<span class="status-pill">📝</span>` : ""}
+          </div>
+        </div>
+        <div class="acts">
+          <button class="star ${j.favorite ? "on" : ""}" title="Favorite">★</button>
+          ${NEXT_STAGE[j.status] ? `<button class="act plus" title="Bump to ${NEXT_STAGE[j.status]}">+</button>` : ""}
+          <button class="act x" title="${j.status === "archived" ? "Restore to inbox" : "Archive"}">×</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="post">${j.text}</div>
+        <div class="controls">
+          <label>Status:
+            <select class="status-sel">
+              ${STATUSES.slice(1).map(s =>
+                `<option value="${s}" ${j.status === s ? "selected" : ""}>${s}</option>`).join("")}
+            </select>
+          </label>
+          <span class="saved">saved ✓</span>
+        </div>
+        <textarea class="notes" placeholder="Notes — contacts, application date, follow-ups…">${esc(j.notes)}</textarea>
+      </div>
+    </div>`;
+}
+
+function render() {
+  renderTabs();
+  const jobs = visible();
+  state.zenIdx = Math.max(0, Math.min(state.zenIdx, jobs.length - 1));
+  if (state.zen) {
+    const j = jobs[state.zenIdx];
+    $("#count").textContent = "";
+    $("#list").innerHTML = `
+      <div class="zen-bar">
+        <button id="zen-prev" ${state.zenIdx <= 0 ? "disabled" : ""}>←</button>
+        <span class="zen-pos">${jobs.length ? state.zenIdx + 1 : 0} / ${jobs.length}</span>
+        <button id="zen-next" ${state.zenIdx >= jobs.length - 1 ? "disabled" : ""}>→</button>
+        <span class="zen-keys">
+          <kbd>←</kbd><kbd>→</kbd> move · <kbd>+</kbd> bump · <kbd>x</kbd> archive ·
+          <kbd>f</kbd> fav · <kbd>n</kbd> notes · <kbd>z</kbd>/<kbd>Esc</kbd> exit
+        </span>
+      </div>` +
+      (j ? cardHTML(j, true) : '<div class="empty">Nothing matches the current filters.</div>');
+  } else {
+    $("#count").textContent = `${jobs.length} of ${state.jobs.length} posts`;
+    $("#list").innerHTML = jobs.length ? jobs.map(j => cardHTML(j)).join("")
+      : '<div class="empty">Nothing matches. Try clearing filters, or hit Sync.</div>';
+  }
+}
+
+function toggleZen() {
+  state.zen = !state.zen;
+  $("#zen-btn").classList.toggle("on", state.zen);
+  window.scrollTo(0, 0);
+  render();
+}
+
+// After + / × in zen mode, move to the next card. If the acted card left the
+// filtered list (e.g. archived while on the Inbox tab), the same index already
+// points at the next card; otherwise step past it. render() clamps the index.
+function zenStep(actedId) {
+  if (!state.zen) return;
+  if (visible()[state.zenIdx]?.id === actedId) state.zenIdx++;
+}
+
+// ---- events (delegated) ----
+$("#list").addEventListener("click", async e => {
+  if (e.target.closest("#zen-prev")) { state.zenIdx--; render(); return; }
+  if (e.target.closest("#zen-next")) { state.zenIdx++; render(); return; }
+  const card = e.target.closest(".card");
+  if (!card) return;
+  const id = +card.dataset.id;
+  const j = state.jobs.find(j => j.id === id);
+  if (e.target.closest(".star")) {
+    await patch(id, { favorite: !j.favorite });
+    render();
+  } else if (e.target.closest(".act.plus")) {
+    await patch(id, { status: NEXT_STAGE[j.status] || j.status });
+    zenStep(id);
+    render();
+  } else if (e.target.closest(".act.x")) {
+    await patch(id, { status: j.status === "archived" ? "inbox" : "archived" });
+    zenStep(id);
+    render();
+  } else if (!state.zen && e.target.closest(".card-head") && !e.target.closest("a")) {
+    state.closed.has(id) ? state.closed.delete(id) : state.closed.add(id);
+    card.classList.toggle("open");
+  }
+});
+
+document.addEventListener("keydown", async e => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.matches("input, textarea, select")) {
+    if (e.key === "Escape") e.target.blur();
+    return;
+  }
+  if (e.key === "z") { toggleZen(); return; }
+  if (!state.zen) return;
+  const jobs = visible();
+  const j = jobs[state.zenIdx];
+  if (e.key === "ArrowRight" || e.key === "j") {
+    state.zenIdx = Math.min(state.zenIdx + 1, jobs.length - 1); render();
+  } else if (e.key === "ArrowLeft" || e.key === "k") {
+    state.zenIdx = Math.max(state.zenIdx - 1, 0); render();
+  } else if (e.key === "Escape") {
+    toggleZen();
+  } else if (!j) {
+    return;
+  } else if (e.key === "+" || e.key === "=" || e.key === "i") {
+    await patch(j.id, { status: NEXT_STAGE[j.status] || j.status });
+    zenStep(j.id); render();
+  } else if (e.key === "x") {
+    await patch(j.id, { status: j.status === "archived" ? "inbox" : "archived" });
+    zenStep(j.id); render();
+  } else if (e.key === "f") {
+    await patch(j.id, { favorite: !j.favorite }); render();
+  } else if (e.key === "n") {
+    e.preventDefault();
+    $("#list .notes")?.focus();
+  }
+});
+
+$("#list").addEventListener("change", async e => {
+  const card = e.target.closest(".card");
+  if (card && e.target.matches(".status-sel")) {
+    await patch(+card.dataset.id, { status: e.target.value });
+    flashSaved(card); renderTabs();
+  }
+});
+
+const saveNotes = debounce(async (id, val, card) => {
+  await patch(id, { notes: val });
+  flashSaved(card);
+}, 600);
+
+$("#list").addEventListener("input", e => {
+  const card = e.target.closest(".card");
+  if (card && e.target.matches(".notes")) saveNotes(+card.dataset.id, e.target.value, card);
+});
+
+function flashSaved(card) {
+  const el = card.querySelector(".saved");
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), 1200);
+}
+
+$("#filters").addEventListener("click", e => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  const f = chip.dataset.f;
+  state.filters.has(f) ? state.filters.delete(f) : state.filters.add(f);
+  chip.classList.toggle("on");
+  render();
+});
+
+$("#tabs").addEventListener("click", e => {
+  const tab = e.target.closest(".tab");
+  if (!tab) return;
+  state.tab = tab.dataset.tab;
+  render();
+});
+
+$("#search").addEventListener("input", debounce(e => { state.q = e.target.value; render(); }, 200));
+$("#sync-btn").addEventListener("click", sync);
+$("#zen-btn").addEventListener("click", toggleZen);
+
+load();
+</script>
+</body>
+</html>

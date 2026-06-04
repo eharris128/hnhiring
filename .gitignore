@@ -1,0 +1,6 @@
+# personal application state (favorites, notes, statuses)
+data.db
+
+.venv/
+__pycache__/
+*.pyc
