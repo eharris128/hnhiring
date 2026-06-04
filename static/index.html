@@ -268,6 +268,11 @@ function render() {
     $("#list").innerHTML = jobs.length ? jobs.map(j => cardHTML(j)).join("")
       : '<div class="empty">Nothing matches. Try clearing filters, or hit Sync.</div>';
   }
+  // Post bodies are raw HN HTML — make their links open in a new tab.
+  for (const a of document.querySelectorAll("#list .post a")) {
+    a.target = "_blank";
+    a.rel = "noopener";
+  }
 }
 
 function toggleZen() {
