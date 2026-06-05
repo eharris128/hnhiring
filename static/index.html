@@ -83,6 +83,27 @@
   .saved.show { opacity: 1; }
   .empty { color: var(--dim); text-align: center; padding: 60px 0; }
 
+  #apply-modal { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.55);
+                 display: flex; align-items: stretch; justify-content: center; gap: 14px;
+                 padding: 4vh 20px; }
+  #apply-modal[hidden] { display: none; }  /* display:flex above would otherwise defeat `hidden` */
+  .modal-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+                padding: 18px 20px; width: 620px; max-width: 100%; height: 92vh;
+                display: flex; flex-direction: column; gap: 10px; }
+  .modal-job { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+               padding: 18px 20px; width: 520px; height: 92vh; overflow-y: auto; }
+  .modal-job h3 { margin: 0; font-size: 14.5px; }
+  @media (max-width: 1200px) { .modal-job { display: none; } }  /* narrow screens: compose only */
+  .modal-card h2 { margin: 0; font-size: 15px; color: var(--accent); }
+  .modal-card label { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--dim); }
+  .modal-card input { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+                      border-radius: 8px; padding: 7px 11px; font-size: 13.5px; }
+  .modal-card input:focus { outline: none; border-color: var(--accent2); }
+  .modal-card select { flex: 1; }
+  #apply-body { min-height: 220px; margin-top: 0; flex: 1; }
+  .modal-foot { display: flex; gap: 10px; align-items: center; }
+  .modal-foot .attach { color: var(--dim); font-size: 12.5px; margin-right: auto; }
+
   #zen-btn.on { background: var(--accent2); border-color: var(--accent2); color: #0b1620; font-weight: 600; }
   .zen-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
   .zen-pos { font-weight: 600; min-width: 80px; text-align: center; font-variant-numeric: tabular-nums; }
@@ -115,6 +136,23 @@
   <div id="list"></div>
 </main>
 
+<div id="apply-modal" hidden>
+  <div class="modal-card"><!-- compose: left -->
+    <h2 id="apply-title">Apply via email</h2>
+    <label>To <input id="apply-to" type="email"></label>
+    <label>Subject <input id="apply-subject"></label>
+    <label>Pitch <select id="apply-pitch"></select></label>
+    <textarea id="apply-body" spellcheck="true"></textarea>
+    <div class="modal-foot">
+      <span class="attach" id="apply-attach">📎 resume attached · [text](url) → hyperlink</span>
+      <button id="apply-test" title="Send this email to echarris@smcm.edu for a sanity check — no status change">Test</button>
+      <button id="apply-cancel">Cancel</button>
+      <button class="primary" id="apply-send">Send</button>
+    </div>
+  </div>
+  <div class="modal-job" id="apply-job"><!-- job details: right --></div>
+</div>
+
 <script>
 const STATUSES = ["all", "inbox", "interested", "applied", "interviewing", "offer", "rejected", "archived"];
 // Cards are expanded by default; `closed` remembers ones the user collapsed.
@@ -129,6 +167,90 @@ const NEXT_STAGE = { inbox: "interested", interested: "applied", applied: "inter
 const $ = s => document.querySelector(s);
 const esc = s => { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; };
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+
+// Posts that list an email address get an "✉ Apply" button (URL-only posts stay manual).
+// Handles literal addresses plus scraper-dodging forms: "nesra at roundlyhq.com",
+// "jobs [at] foo [dot] com". STOP_LOCAL keeps prose like "more info at example.com"
+// from matching; worst case the To field is editable anyway. Cached per job.
+const STOP_LOCAL = new Set(["apply", "us", "info", "more", "available", "details", "here",
+                            "team", "page", "website", "site", "online", "found", "work",
+                            "role", "position", "openings", "listed", "posted", "live", "out"]);
+function emailsIn(j) {
+  if (!j._emails) {
+    const d = document.createElement("div");
+    d.innerHTML = j.text;
+    const text = d.textContent;
+    const found = text.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g) || [];
+    const ob = /\b([\w.+-]{2,})\s*(?:\[\s*at\s*\]|\(\s*at\s*\)|\s+at\s+)\s*([\w-]+(?:(?:\s*\[\s*dot\s*\]\s*|\s*\(\s*dot\s*\)\s*|\s+dot\s+|\.)[\w-]+)+)(?![\w-]*@)/gi;
+    for (let m; (m = ob.exec(text)); ) {
+      const local = m[1];
+      const domain = m[2].replace(/\s*(?:\[\s*dot\s*\]|\(\s*dot\s*\)|\s+dot\s+)\s*/gi, ".").replace(/\s+/g, "");
+      if (STOP_LOCAL.has(local.toLowerCase()) || !/\.[a-z]{2,}$/i.test(domain)) continue;
+      found.push(`${local}@${domain}`);
+    }
+    j._emails = [...new Set(found)];
+  }
+  return j._emails;
+}
+
+// HN convention: "Company | Role | Location | …"
+const titleParts = j => j.title.split("|").map(s => s.trim());
+
+// "About me" variants distilled from real applications sent June 2026 — pick
+// per company in the modal; edit the texts here as the pitch evolves.
+const PITCHES = {
+  // First entry is the default selection in the compose modal.
+  fullstack: {
+    label: "AI-forward full-stack",
+    text: `While I have 10,000+ hours programming by hand in TypeScript, Golang, and JavaScript, more and more of my time looks like 6+ terminals running Claude Code to ship evaluations, agent systems to HIPAA production systems, and automate TOIL for my company.
+
+I resonate with Andrej Karpathy's goal of not writing another line of code by hand. Although I still use nano / vim to edit .env files time to time.`,
+  },
+  medtech: {
+    label: "HIPAA / medtech",
+    text: `I am a software engineer with HIPAA experience from my current medtech company, and a lot of time spent in Cloudwatch logs and Grafana. The HIPAA space gets all the more interesting as I deploy more and more AI agents.`,
+  },
+  safety: {
+    label: "AI safety / research",
+    text: `I am heavily invested in AI Safety, AI Security, and understanding a path forward to reduce Global Catastrophic Risk stemming from advanced AI systems. I have been leading a Supervised Program for Alignment Research team for the past few months. See the Results section of [the poster](https://evanharris.dev/presentations/disentangling-self-preservation/). I want to build agents, harnesses, and experimental setups to understand drift and risk from long-running agents.`,
+  },
+  show: {
+    label: "Show, don't tell",
+    text: `Want to see what I have built rather than listen to me tell you about it?`,
+  },
+};
+
+// "sid@augusthealth.com" → "Sid"; role addresses ("careers@", "jobs@") → "there".
+const GENERIC_LOCAL = new Set(["careers", "jobs", "info", "hiring", "hello", "contact",
+                               "team", "talent", "recruiting", "recruitment", "hr",
+                               "apply", "work", "join", "mail", "admin", "office"]);
+function greetName(to) {
+  const first = (to.split("@")[0] || "").split("+")[0].split(/[._-]/)[0];
+  if (!/^[a-z]+$/i.test(first) || GENERIC_LOCAL.has(first.toLowerCase())) return "there";
+  return first[0].toUpperCase() + first.slice(1).toLowerCase();
+}
+
+function applyTemplate(j, pitchKey, to) {
+  const day = new Date().toLocaleDateString("en-US", { weekday: "long" });
+  const month = (state.thread?.title.match(/\(([^)]+)\)/) || [])[1];
+  return `Hi ${greetName(to)},
+
+Happy ${day}.
+
+Ran across your post on the HN Who's Hiring thread${month ? ` for ${month.split(" ")[0]}` : ""}.
+
+${PITCHES[pitchKey].text}
+
+Checkout my [personal website](https://evanharris.dev/) or my attached resume for more.
+
+Best,
+Evan
+
+P.S. [company-specific hook, EDIT ME or delete]`;
+}
+
+// Apply only makes sense before an application exists (and with an email to send to).
+const canApply = j => ["inbox", "interested"].includes(j.status) && emailsIn(j).length > 0;
 
 const isRemote = j => j.tags.includes("remote");
 const isUS = j => j.tags.includes("us");
@@ -238,6 +360,7 @@ function cardHTML(j, forceOpen = false) {
                 `<option value="${s}" ${j.status === s ? "selected" : ""}>${s}</option>`).join("")}
             </select>
           </label>
+          ${canApply(j) ? `<button class="apply-btn" title="Email an application, resume attached">✉ Apply</button>` : ""}
           <span class="saved">saved ✓</span>
         </div>
         <textarea class="notes" placeholder="Notes — contacts, application date, follow-ups…">${esc(j.notes)}</textarea>
@@ -259,7 +382,7 @@ function render() {
         <button id="zen-next" ${state.zenIdx >= jobs.length - 1 ? "disabled" : ""}>→</button>
         <span class="zen-keys">
           <kbd>←</kbd><kbd>→</kbd> move · <kbd>+</kbd> bump · <kbd>x</kbd> archive ·
-          <kbd>f</kbd> fav · <kbd>n</kbd> notes · <kbd>z</kbd>/<kbd>Esc</kbd> exit
+          <kbd>f</kbd> fav · <kbd>a</kbd> apply · <kbd>n</kbd> notes · <kbd>z</kbd>/<kbd>Esc</kbd> exit
         </span>
       </div>` +
       (j ? cardHTML(j, true) : '<div class="empty">Nothing matches the current filters.</div>');
@@ -290,6 +413,86 @@ function zenStep(actedId) {
   if (visible()[state.zenIdx]?.id === actedId) state.zenIdx++;
 }
 
+// ---- apply-by-email modal ----
+let applyJobId = null;
+
+$("#apply-pitch").innerHTML = Object.entries(PITCHES).map(([k, p]) =>
+  `<option value="${k}">${p.label}</option>`).join("");
+
+function openApply(j) {
+  applyJobId = j.id;
+  const [company, role] = titleParts(j);
+  $("#apply-title").textContent = `Apply — ${company || j.title}`;
+  $("#apply-to").value = emailsIn(j)[0] || "";
+  $("#apply-subject").value = role ? `HN Who's Hiring: ${role}` : `HN Who's Hiring — ${j.title}`;
+  $("#apply-body").value = applyTemplate(j, $("#apply-pitch").value, $("#apply-to").value);
+  $("#apply-job").innerHTML = `
+    <h3>${esc(j.title)}</h3>
+    <div class="badges">${badgesFor(j)}</div>
+    <div class="card-meta">
+      ${esc(j.author)} · ${new Date(j.time * 1000).toLocaleDateString()}
+      · <a href="https://news.ycombinator.com/item?id=${j.id}" target="_blank" rel="noopener">HN ↗</a>
+    </div>
+    <div class="post" style="margin-top:12px">${j.text}</div>`;
+  for (const a of document.querySelectorAll("#apply-job .post a")) {
+    a.target = "_blank";
+    a.rel = "noopener";
+  }
+  $("#apply-modal").hidden = false;
+  $("#apply-body").focus();
+}
+
+// Switching pitch rebuilds the body from the template (drops manual edits).
+$("#apply-pitch").addEventListener("change", () => {
+  const j = state.jobs.find(j => j.id === applyJobId);
+  if (j) $("#apply-body").value = applyTemplate(j, $("#apply-pitch").value, $("#apply-to").value);
+});
+
+function closeApply() {
+  $("#apply-modal").hidden = true;
+  applyJobId = null;
+}
+
+async function sendApply(test = false) {
+  const to = $("#apply-to").value.trim();
+  const subject = $("#apply-subject").value.trim();
+  const body = $("#apply-body").value;
+  if (!to && !test) { alert("No recipient."); return; }
+  if (!test && body.includes("EDIT ME") &&
+      !confirm("The body still contains the [EDIT ME] placeholder — send anyway?")) return;
+  const btn = test ? $("#apply-test") : $("#apply-send");
+  btn.disabled = true; btn.textContent = "Sending…";
+  let ok = false;
+  try {
+    const r = await fetch(`/api/jobs/${applyJobId}/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to, subject, body, test }),
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    ok = true;
+    if (test) {  // modal stays open for the real send
+      setTimeout(() => { btn.textContent = "Test"; }, 2000);
+      return;
+    }
+    const u = await r.json();
+    const j = state.jobs.find(j => j.id === applyJobId);
+    Object.assign(j, { status: u.status, notes: u.notes });
+    closeApply();
+    render();
+  } catch (e) {
+    alert("Send failed: " + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = test ? (ok ? "Sent ✓" : "Test") : "Send";
+  }
+}
+
+$("#apply-send").addEventListener("click", () => sendApply(false));
+$("#apply-test").addEventListener("click", () => sendApply(true));
+$("#apply-cancel").addEventListener("click", closeApply);
+$("#apply-modal").addEventListener("click", e => { if (e.target.id === "apply-modal") closeApply(); });
+
 // ---- events (delegated) ----
 $("#list").addEventListener("click", async e => {
   if (e.target.closest("#zen-prev")) { state.zenIdx--; render(); return; }
@@ -301,6 +504,8 @@ $("#list").addEventListener("click", async e => {
   if (e.target.closest(".star")) {
     await patch(id, { favorite: !j.favorite });
     render();
+  } else if (e.target.closest(".apply-btn")) {
+    openApply(j);
   } else if (e.target.closest(".act.plus")) {
     await patch(id, { status: NEXT_STAGE[j.status] || j.status });
     zenStep(id);
@@ -319,6 +524,10 @@ document.addEventListener("keydown", async e => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target.matches("input, textarea, select")) {
     if (e.key === "Escape") e.target.blur();
+    return;
+  }
+  if (!$("#apply-modal").hidden) {           // modal owns the keyboard while open
+    if (e.key === "Escape") closeApply();
     return;
   }
   if (e.key === "z") { toggleZen(); return; }
@@ -341,6 +550,8 @@ document.addEventListener("keydown", async e => {
     zenStep(j.id); render();
   } else if (e.key === "f") {
     await patch(j.id, { favorite: !j.favorite }); render();
+  } else if (e.key === "a" && canApply(j)) {
+    openApply(j);
   } else if (e.key === "n") {
     e.preventDefault();
     $("#list .notes")?.focus();

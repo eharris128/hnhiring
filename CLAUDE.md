@@ -15,8 +15,15 @@ the inline JS (extract the `<script>` block from `static/index.html`).
 
 ## Architecture (deliberately small — keep it that way)
 
-- `app.py` — FastAPI. Three endpoints: `POST /api/sync`, `GET /api/jobs`,
-  `PATCH /api/jobs/{id}` (favorite/status/notes only).
+- `app.py` — FastAPI. Four endpoints: `POST /api/sync`, `GET /api/jobs`,
+  `PATCH /api/jobs/{id}` (favorite/status/notes only), and
+  `POST /api/jobs/{id}/apply` — emails an application via `mailer.py` (resume
+  attached), then sets status=applied and appends an audit line to notes.
+- `mailer.py` — Gmail SMTP (app password) with the resume PDF attached.
+  Credentials in `mail.json` (gitignored; see `mail.json.example`). Posts whose
+  text contains an email get an "✉ Apply" button (compose modal, prefilled
+  template; `a` key in zen mode). Email detection is frontend-only
+  (`emailsIn()` in index.html), nothing stored.
 - `hn.py` — resolves newest thread via Algolia (`author_whoishiring`), fetches
   story + all `kids` from Firebase (`/v0/item/<id>.json`), 50 concurrent.
   Fallback thread id is hardcoded; sync accepts `?thread_id=` for old months.

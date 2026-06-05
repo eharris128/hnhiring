@@ -1,6 +1,9 @@
 # personal application state (favorites, notes, statuses)
 data.db
 
+# gmail credentials for the apply-by-email button
+mail.json
+
 .venv/
 __pycache__/
 *.pyc

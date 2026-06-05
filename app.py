@@ -3,6 +3,8 @@
 Run:  uvicorn app:app --reload
 """
 
+import smtplib
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -11,6 +13,7 @@ from pydantic import BaseModel
 
 import db
 import hn
+import mailer
 
 app = FastAPI(title="hnhiring")
 STATIC = Path(__file__).parent / "static"
@@ -20,6 +23,13 @@ class UserStatePatch(BaseModel):
     favorite: bool | None = None
     status: str | None = None
     notes: str | None = None
+
+
+class ApplyRequest(BaseModel):
+    to: str
+    subject: str
+    body: str
+    test: bool = False  # send to mail.json's test_address instead; no state change
 
 
 STATUSES = {"inbox", "interested", "applied", "interviewing", "offer", "rejected", "archived"}
@@ -48,6 +58,40 @@ async def sync(thread_id: int | None = None):
     try:
         db.upsert_jobs(conn, thread, jobs)
         return {"thread_id": thread["id"], "title": thread.get("title"), "jobs": len(jobs)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/jobs/{job_id}/apply")
+def apply(job_id: int, req: ApplyRequest):
+    """Email an application (resume attached), then mark the post applied."""
+    conn = db.connect()
+    try:
+        exists = conn.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        if not exists:
+            raise HTTPException(404, "unknown job id")
+        to, subject = req.to, req.subject
+        try:
+            if req.test:
+                to = mailer.load_config().get("test_address")
+                if not to:
+                    raise mailer.MailConfigError("add test_address to mail.json")
+                subject = f"[TEST] {req.subject}"
+            mailer.send_application(to, subject, req.body)
+        except mailer.MailConfigError as e:
+            raise HTTPException(503, str(e))
+        except smtplib.SMTPAuthenticationError:
+            raise HTTPException(502, "Gmail rejected the login — check app_password in mail.json")
+        except (smtplib.SMTPException, OSError) as e:
+            raise HTTPException(502, f"send failed: {e}")
+        if req.test:
+            return {"test": True, "to": to}
+        # Audit trail in notes, then bump the pipeline stage.
+        row = conn.execute("SELECT notes FROM user_state WHERE job_id = ?", (job_id,)).fetchone()
+        notes = (row["notes"] if row else "") or ""
+        stamp = time.strftime("%Y-%m-%d")
+        notes = f"{notes.rstrip()}\n✉ applied {stamp} → {req.to}".strip()
+        return db.update_user_state(conn, job_id, {"status": "applied", "notes": notes})
     finally:
         conn.close()
 
