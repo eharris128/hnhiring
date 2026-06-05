@@ -156,15 +156,16 @@
 </div>
 
 <script>
-const STATUSES = ["all", "inbox", "interested", "applied", "interviewing", "offer", "rejected", "archived"];
+const STATUSES = ["all", "inbox", "interested", "later", "applied", "interviewing", "offer", "rejected", "archived"];
 // Cards are expanded by default; `closed` remembers ones the user collapsed.
 // Zen mode shows one card at a time from the current filtered list.
 const state = { jobs: [], thread: null, q: "", filters: new Set(), tab: "all", closed: new Set(),
                 zen: false, zenIdx: 0 };
 
-// + bumps a post one step along the review pipeline.
-const NEXT_STAGE = { inbox: "interested", interested: "applied", applied: "interviewing",
-                     interviewing: "offer" };
+// + bumps a post one step along the review pipeline; "later" is a parking lot
+// that re-enters at interested.
+const NEXT_STAGE = { inbox: "interested", interested: "applied", later: "interested",
+                     applied: "interviewing", interviewing: "offer" };
 
 // Bumping into "applied" without the email flow means a web portal: no follow-up
 // needed, unlike applied_via=email (set by the apply endpoint).
@@ -259,7 +260,7 @@ Evan`;
 }
 
 // Apply only makes sense before an application exists (and with an email to send to).
-const canApply = j => ["inbox", "interested"].includes(j.status) && emailsIn(j).length > 0;
+const canApply = j => ["inbox", "interested", "later"].includes(j.status) && emailsIn(j).length > 0;
 
 const isRemote = j => j.tags.includes("remote");
 const isUS = j => j.tags.includes("us");
@@ -392,7 +393,7 @@ function render() {
         <button id="zen-next" ${state.zenIdx >= jobs.length - 1 ? "disabled" : ""}>→</button>
         <span class="zen-keys">
           <kbd>←</kbd><kbd>→</kbd> move · <kbd>+</kbd> bump · <kbd>x</kbd> archive ·
-          <kbd>f</kbd> fav · <kbd>a</kbd> apply · <kbd>i</kbd> interested tab · <kbd>n</kbd> notes · <kbd>z</kbd>/<kbd>Esc</kbd> exit
+          <kbd>f</kbd> fav · <kbd>l</kbd> later · <kbd>a</kbd> apply · <kbd>i</kbd> interested tab · <kbd>n</kbd> notes · <kbd>z</kbd>/<kbd>Esc</kbd> exit
         </span>
       </div>` +
       (j ? cardHTML(j, true) : '<div class="empty">Nothing matches the current filters.</div>');
@@ -441,7 +442,7 @@ function openApply(j) {
   const [company, role] = titleParts(j);
   $("#apply-title").textContent = `Apply — ${company || j.title}`;
   $("#apply-to").value = emailsIn(j)[0] || "";
-  $("#apply-subject").value = role ? `HN Who's Hiring: ${role}` : `HN Who's Hiring — ${j.title}`;
+  $("#apply-subject").value = role ? `HN Who's Hiring: ${role}` : `HN Who's Hiring: ${j.title}`;
   $("#apply-body").value = applyTemplate(j, $("#apply-pitch").value, $("#apply-to").value);
   $("#apply-job").innerHTML = `
     <h3>${esc(j.title)}</h3>
@@ -606,6 +607,9 @@ document.addEventListener("keydown", async e => {
     zenStep(j.id); render();
   } else if (e.key === "f") {
     await patch(j.id, { favorite: !j.favorite }); render();
+  } else if (e.key === "l") {
+    await patch(j.id, { status: "later" });
+    zenStep(j.id); render();
   } else if (e.key === "a" && canApply(j)) {
     e.preventDefault();  // don't let the "a" keystroke type into the focused body
     openApply(j);

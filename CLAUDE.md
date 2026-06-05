@@ -42,8 +42,9 @@ the inline JS (extract the `<script>` block from `static/index.html`).
    statuses live in `user_state` keyed by HN comment id and must survive any
    re-sync, re-classify, or schema change.
 2. **Statuses**: inbox → interested → applied → interviewing → offer /
-   rejected / archived. The `+` action follows `NEXT_STAGE` in index.html;
-   `×` toggles archived ↔ inbox.
+   rejected / archived, plus `later` (parking lot; `l` in zen mode, `+`
+   re-enters at interested). The `+` action follows `NEXT_STAGE` in
+   index.html; `×` toggles archived ↔ inbox.
 3. Post bodies are raw HN-sanitized HTML rendered via innerHTML; links in them
    get `target="_blank" rel="noopener"` applied post-render in `render()`.
 4. Cards are expanded by default (`state.closed` tracks collapsed ones).

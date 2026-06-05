@@ -33,7 +33,7 @@ class ApplyRequest(BaseModel):
     test: bool = False  # send to mail.json's test_address instead; no state change
 
 
-STATUSES = {"inbox", "interested", "applied", "interviewing", "offer", "rejected", "archived"}
+STATUSES = {"inbox", "interested", "later", "applied", "interviewing", "offer", "rejected", "archived"}
 
 
 @app.get("/")
