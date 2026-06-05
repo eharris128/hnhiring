@@ -71,6 +71,7 @@
   .card-body { display: none; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
   .card.open .card-body { display: block; }
   .post { font-size: 14px; overflow-wrap: anywhere; }
+  .post a:focus { outline: 2px solid var(--accent2); outline-offset: 2px; border-radius: 2px; }
   .post p { margin: 8px 0; }
   .controls { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
   select { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
@@ -105,6 +106,7 @@
   .modal-foot .attach { color: var(--dim); font-size: 12.5px; margin-right: auto; }
 
   #zen-btn.on { background: var(--accent2); border-color: var(--accent2); color: #0b1620; font-weight: 600; }
+  body.zen header { display: none; }  /* zen = no nav chrome, just the card and hotkeys */
   .zen-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
   .zen-pos { font-weight: 600; min-width: 80px; text-align: center; font-variant-numeric: tabular-nums; }
   .zen-keys { color: var(--dim); font-size: 12px; margin-left: auto; }
@@ -164,6 +166,15 @@ const state = { jobs: [], thread: null, q: "", filters: new Set(), tab: "all", c
 const NEXT_STAGE = { inbox: "interested", interested: "applied", applied: "interviewing",
                      interviewing: "offer" };
 
+// Bumping into "applied" without the email flow means a web portal: no follow-up
+// needed, unlike applied_via=email (set by the apply endpoint).
+function bumpFields(j) {
+  const status = NEXT_STAGE[j.status] || j.status;
+  const fields = { status };
+  if (status === "applied" && j.status !== "applied" && !j.applied_via) fields.applied_via = "portal";
+  return fields;
+}
+
 const $ = s => document.querySelector(s);
 const esc = s => { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; };
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
@@ -204,7 +215,7 @@ const PITCHES = {
     label: "AI-forward full-stack",
     text: `While I have 10,000+ hours programming by hand in TypeScript, Golang, and JavaScript, more and more of my time looks like 6+ terminals running Claude Code to ship evaluations, agent systems to HIPAA production systems, and automate TOIL for my company.
 
-I resonate with Andrej Karpathy's goal of not writing another line of code by hand. Although I still use nano / vim to edit .env files time to time.`,
+I resonate with Andrej Karpathy's goal of not writing another line of code by hand. Although I still use nano / vim to edit .env files from time to time.`,
   },
   medtech: {
     label: "HIPAA / medtech",
@@ -241,12 +252,10 @@ Ran across your post on the HN Who's Hiring thread${month ? ` for ${month.split(
 
 ${PITCHES[pitchKey].text}
 
-Checkout my [personal website](https://evanharris.dev/) or my attached resume for more.
+Checkout my [personal website](https://evanharris.dev/) or my attached resume for more details.
 
 Best,
-Evan
-
-P.S. [company-specific hook, EDIT ME or delete]`;
+Evan`;
 }
 
 // Apply only makes sense before an application exists (and with an email to send to).
@@ -342,6 +351,7 @@ function cardHTML(j, forceOpen = false) {
             ${esc(j.author)} · ${new Date(j.time * 1000).toLocaleDateString()}
             · <a href="https://news.ycombinator.com/item?id=${j.id}" target="_blank" rel="noopener">HN ↗</a>
             ${j.status !== "inbox" ? `<span class="status-pill">${j.status}</span>` : ""}
+            ${j.applied_via ? `<span class="status-pill">${j.applied_via === "email" ? "✉ email" : "🔗 portal"}</span>` : ""}
             ${j.notes.trim() ? `<span class="status-pill">📝</span>` : ""}
           </div>
         </div>
@@ -382,7 +392,7 @@ function render() {
         <button id="zen-next" ${state.zenIdx >= jobs.length - 1 ? "disabled" : ""}>→</button>
         <span class="zen-keys">
           <kbd>←</kbd><kbd>→</kbd> move · <kbd>+</kbd> bump · <kbd>x</kbd> archive ·
-          <kbd>f</kbd> fav · <kbd>a</kbd> apply · <kbd>n</kbd> notes · <kbd>z</kbd>/<kbd>Esc</kbd> exit
+          <kbd>f</kbd> fav · <kbd>a</kbd> apply · <kbd>i</kbd> interested tab · <kbd>n</kbd> notes · <kbd>z</kbd>/<kbd>Esc</kbd> exit
         </span>
       </div>` +
       (j ? cardHTML(j, true) : '<div class="empty">Nothing matches the current filters.</div>');
@@ -396,11 +406,18 @@ function render() {
     a.target = "_blank";
     a.rel = "noopener";
   }
+  // Zen: Tab cycles through the post's links only — buttons/selects/notes drop
+  // out of the tab order (they keep their hotkeys: +, x, f, n).
+  if (state.zen) {
+    for (const el of document.querySelectorAll("#list button, #list select, #list textarea, #list .card-meta a"))
+      el.tabIndex = -1;
+  }
 }
 
 function toggleZen() {
   state.zen = !state.zen;
   $("#zen-btn").classList.toggle("on", state.zen);
+  document.body.classList.toggle("zen", state.zen);
   window.scrollTo(0, 0);
   render();
 }
@@ -460,36 +477,74 @@ async function sendApply(test = false) {
   if (!to && !test) { alert("No recipient."); return; }
   if (!test && body.includes("EDIT ME") &&
       !confirm("The body still contains the [EDIT ME] placeholder — send anyway?")) return;
-  const btn = test ? $("#apply-test") : $("#apply-send");
-  btn.disabled = true; btn.textContent = "Sending…";
-  let ok = false;
-  try {
-    const r = await fetch(`/api/jobs/${applyJobId}/apply`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to, subject, body, test }),
-    });
+
+  const jobId = applyJobId;  // capture before closeApply() nulls it
+  const post = () => fetch(`/api/jobs/${jobId}/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ to, subject, body, test }),
+  }).then(async r => {
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-    ok = true;
-    if (test) {  // modal stays open for the real send
+    return r.json();
+  });
+
+  if (test) {  // test stays in-modal with button feedback
+    const btn = $("#apply-test");
+    btn.disabled = true; btn.textContent = "Sending…";
+    try {
+      await post();
+      btn.textContent = "Sent ✓";
       setTimeout(() => { btn.textContent = "Test"; }, 2000);
-      return;
+    } catch (e) {
+      btn.textContent = "Test";
+      alert("Test send failed: " + e.message);
+    } finally {
+      btn.disabled = false;
     }
-    const u = await r.json();
-    const j = state.jobs.find(j => j.id === applyJobId);
-    Object.assign(j, { status: u.status, notes: u.notes });
-    closeApply();
+    return;
+  }
+
+  // Real send: optimistic. Flip the card to applied and advance zen right away,
+  // deliver in the background; a failure rolls the status back.
+  const pitch = $("#apply-pitch").value;
+  const j = state.jobs.find(j => j.id === jobId);
+  const prevStatus = j.status, prevVia = j.applied_via;
+  j.status = "applied";
+  j.applied_via = "email";
+  closeApply();
+  zenStep(jobId);
+  render();
+  try {
+    const u = await post();
+    Object.assign(j, { status: u.status, notes: u.notes, applied_via: u.applied_via });
     render();
   } catch (e) {
-    alert("Send failed: " + e.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = test ? (ok ? "Sent ✓" : "Test") : "Send";
+    j.status = prevStatus;
+    j.applied_via = prevVia;
+    render();
+    if ($("#apply-modal").hidden) {
+      alert(`Send to ${to} failed: ${e.message}\n\nReopening your draft.`);
+      openApply(j);
+      $("#apply-pitch").value = pitch;
+      $("#apply-to").value = to;
+      $("#apply-subject").value = subject;
+      $("#apply-body").value = body;
+    } else {  // he's already composing the next one — don't clobber that draft
+      alert(`Send to ${to} failed: ${e.message}\n\n"${j.title.slice(0, 60)}" is back in ${prevStatus}.`);
+    }
   }
 }
 
 $("#apply-send").addEventListener("click", () => sendApply(false));
 $("#apply-test").addEventListener("click", () => sendApply(true));
+
+// In the body editor: Tab jumps to Send, Shift+Tab sends immediately.
+$("#apply-body").addEventListener("keydown", e => {
+  if (e.key !== "Tab") return;
+  e.preventDefault();
+  if (e.shiftKey) sendApply(false);
+  else $("#apply-send").focus();
+});
 $("#apply-cancel").addEventListener("click", closeApply);
 $("#apply-modal").addEventListener("click", e => { if (e.target.id === "apply-modal") closeApply(); });
 
@@ -507,7 +562,7 @@ $("#list").addEventListener("click", async e => {
   } else if (e.target.closest(".apply-btn")) {
     openApply(j);
   } else if (e.target.closest(".act.plus")) {
-    await patch(id, { status: NEXT_STAGE[j.status] || j.status });
+    await patch(id, bumpFields(j));
     zenStep(id);
     render();
   } else if (e.target.closest(".act.x")) {
@@ -531,6 +586,7 @@ document.addEventListener("keydown", async e => {
     return;
   }
   if (e.key === "z") { toggleZen(); return; }
+  if (e.key === "i") { state.tab = "interested"; state.zenIdx = 0; render(); return; }
   if (!state.zen) return;
   const jobs = visible();
   const j = jobs[state.zenIdx];
@@ -542,8 +598,8 @@ document.addEventListener("keydown", async e => {
     toggleZen();
   } else if (!j) {
     return;
-  } else if (e.key === "+" || e.key === "=" || e.key === "i") {
-    await patch(j.id, { status: NEXT_STAGE[j.status] || j.status });
+  } else if (e.key === "+" || e.key === "=") {
+    await patch(j.id, bumpFields(j));
     zenStep(j.id); render();
   } else if (e.key === "x") {
     await patch(j.id, { status: j.status === "archived" ? "inbox" : "archived" });
@@ -551,6 +607,7 @@ document.addEventListener("keydown", async e => {
   } else if (e.key === "f") {
     await patch(j.id, { favorite: !j.favorite }); render();
   } else if (e.key === "a" && canApply(j)) {
+    e.preventDefault();  // don't let the "a" keystroke type into the focused body
     openApply(j);
   } else if (e.key === "n") {
     e.preventDefault();

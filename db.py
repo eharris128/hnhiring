@@ -26,11 +26,12 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 
 CREATE TABLE IF NOT EXISTS user_state (
-    job_id     INTEGER PRIMARY KEY,
-    favorite   INTEGER NOT NULL DEFAULT 0,
-    status     TEXT NOT NULL DEFAULT 'inbox',
-    notes      TEXT NOT NULL DEFAULT '',
-    updated_at INTEGER
+    job_id      INTEGER PRIMARY KEY,
+    favorite    INTEGER NOT NULL DEFAULT 0,
+    status      TEXT NOT NULL DEFAULT 'inbox',
+    notes       TEXT NOT NULL DEFAULT '',
+    applied_via TEXT,                -- 'email' (follow up) | 'portal' | NULL
+    updated_at  INTEGER
 );
 """
 
@@ -39,6 +40,10 @@ def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    # Migrate pre-applied_via databases (CREATE IF NOT EXISTS won't add columns).
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(user_state)")}
+    if "applied_via" not in cols:
+        conn.execute("ALTER TABLE user_state ADD COLUMN applied_via TEXT")
     return conn
 
 
@@ -63,7 +68,8 @@ def list_jobs(conn: sqlite3.Connection, thread_id: int | None = None) -> list[di
     rows = conn.execute(
         f"""SELECT j.*, COALESCE(u.favorite, 0) AS favorite,
                    COALESCE(u.status, 'inbox') AS status,
-                   COALESCE(u.notes, '') AS notes
+                   COALESCE(u.notes, '') AS notes,
+                   u.applied_via AS applied_via
             FROM jobs j LEFT JOIN user_state u ON u.job_id = j.id
             {where} ORDER BY j.time DESC""",
         params,
@@ -78,7 +84,7 @@ def list_jobs(conn: sqlite3.Connection, thread_id: int | None = None) -> list[di
 
 
 def update_user_state(conn: sqlite3.Connection, job_id: int, fields: dict) -> dict:
-    allowed = {k: v for k, v in fields.items() if k in ("favorite", "status", "notes")}
+    allowed = {k: v for k, v in fields.items() if k in ("favorite", "status", "notes", "applied_via")}
     if "favorite" in allowed:
         allowed["favorite"] = int(bool(allowed["favorite"]))
     conn.execute(

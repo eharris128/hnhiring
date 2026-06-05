@@ -23,6 +23,7 @@ class UserStatePatch(BaseModel):
     favorite: bool | None = None
     status: str | None = None
     notes: str | None = None
+    applied_via: str | None = None  # 'email' | 'portal'
 
 
 class ApplyRequest(BaseModel):
@@ -91,7 +92,8 @@ def apply(job_id: int, req: ApplyRequest):
         notes = (row["notes"] if row else "") or ""
         stamp = time.strftime("%Y-%m-%d")
         notes = f"{notes.rstrip()}\n✉ applied {stamp} → {req.to}".strip()
-        return db.update_user_state(conn, job_id, {"status": "applied", "notes": notes})
+        return db.update_user_state(
+            conn, job_id, {"status": "applied", "notes": notes, "applied_via": "email"})
     finally:
         conn.close()
 
@@ -100,6 +102,8 @@ def apply(job_id: int, req: ApplyRequest):
 def patch_job(job_id: int, patch: UserStatePatch):
     if patch.status is not None and patch.status not in STATUSES:
         raise HTTPException(422, f"status must be one of {sorted(STATUSES)}")
+    if patch.applied_via is not None and patch.applied_via not in ("email", "portal"):
+        raise HTTPException(422, "applied_via must be 'email' or 'portal'")
     conn = db.connect()
     try:
         exists = conn.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone()

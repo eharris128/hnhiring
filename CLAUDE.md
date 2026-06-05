@@ -16,9 +16,11 @@ the inline JS (extract the `<script>` block from `static/index.html`).
 ## Architecture (deliberately small — keep it that way)
 
 - `app.py` — FastAPI. Four endpoints: `POST /api/sync`, `GET /api/jobs`,
-  `PATCH /api/jobs/{id}` (favorite/status/notes only), and
+  `PATCH /api/jobs/{id}` (favorite/status/notes/applied_via only), and
   `POST /api/jobs/{id}/apply` — emails an application via `mailer.py` (resume
-  attached), then sets status=applied and appends an audit line to notes.
+  attached), then sets status=applied, applied_via=email, and appends an audit
+  line to notes. `applied_via` ('email' = needs follow-up | 'portal' | NULL)
+  is also set to 'portal' by the frontend when `+` bumps interested→applied.
 - `mailer.py` — Gmail SMTP (app password) with the resume PDF attached.
   Credentials in `mail.json` (gitignored; see `mail.json.example`). Posts whose
   text contains an email get an "✉ Apply" button (compose modal, prefilled
