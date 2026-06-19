@@ -130,6 +130,9 @@
   <div class="bar">
     <h1>HN Hiring</h1>
     <span class="meta" id="thread-meta">no data yet — hit Sync</span>
+    <select id="month-select" title="Switch month" hidden></select>
+    <button id="followup-elsewhere" class="chip due" hidden
+            title="Follow-ups due in months you're not viewing — click to jump there"></button>
     <div class="search-wrap">
       <input id="search" type="search" placeholder="Search company, tech, keywords…">
       <button id="search-clear" type="button" title="Clear search" hidden>×</button>
@@ -174,8 +177,8 @@
 const STATUSES = ["all", "inbox", "interested", "later", "applied", "interviewing", "offer", "rejected", "archived"];
 // Cards are expanded by default; `closed` remembers ones the user collapsed.
 // Zen mode shows one card at a time from the current filtered list.
-const state = { jobs: [], thread: null, q: "", filters: new Set(), tab: "all", closed: new Set(),
-                zen: false, zenIdx: 0 };
+const state = { jobs: [], threads: [], thread: null, threadId: null, q: "", filters: new Set(),
+                tab: "all", closed: new Set(), zen: false, zenIdx: 0 };
 
 // + bumps a post one step along the review pipeline; "later" is a parking lot
 // that re-enters at interested.
@@ -299,16 +302,53 @@ const isUS = j => j.tags.includes("us");
 const isSwiss = j => j.tags.includes("switzerland") ||
   (isRemote(j) && (j.tags.includes("europe") || j.tags.includes("worldwide")));
 
-async function load() {
-  const r = await fetch("/api/jobs");
-  const data = await r.json();
+// HN title → short month label: "Ask HN: Who is hiring? (June 2026)" → "June 2026".
+const monthLabel = t => (t.title.match(/\(([^)]+)\)/) || [])[1] || t.title;
+
+// The month picker plus its cross-month follow-up cue. Browsing stays per-month; the
+// only signal that crosses months is followup_due (server-computed in /api/threads),
+// so an application maturing after a rollover stays visible from the default view.
+function renderMonthPicker() {
+  const sel = $("#month-select");
+  if (!state.threads.length) {
+    sel.hidden = true;
+  } else {
+    sel.hidden = false;
+    sel.disabled = state.threads.length < 2;  // single month: show it, but no false choice
+    sel.innerHTML = state.threads.map(t => {
+      const due = t.followup_due ? ` · ↻${t.followup_due}` : "";
+      return `<option value="${t.id}" ${t.id === state.threadId ? "selected" : ""}>${esc(monthLabel(t))} · ${t.job_count}${due}</option>`;
+    }).join("");
+  }
+  // Always-visible cue: follow-ups due in months OTHER than the one in view (the
+  // current month's are already on the in-card ↻ chip). Hidden when none.
+  const elsewhere = state.threads
+    .filter(t => t.id !== state.threadId)
+    .reduce((n, t) => n + (t.followup_due || 0), 0);
+  const btn = $("#followup-elsewhere");
+  btn.hidden = !elsewhere;
+  btn.textContent = elsewhere ? `↻ ${elsewhere} due in other months` : "";
+}
+
+// threadId optional: absent/null → newest month (initial load + R5 back-compat). Fetches
+// the month list every time so the picker stays correct after a sync, no extra bookkeeping.
+async function load(threadId) {
+  const [threads, data] = await Promise.all([
+    fetch("/api/threads").then(r => r.json()),
+    fetch("/api/jobs" + (threadId ? `?thread_id=${threadId}` : "")).then(r => r.json()),
+  ]);
+  state.threads = threads;
   state.jobs = data.jobs;
   state.thread = data.thread;
+  state.threadId = state.thread ? state.thread.id : null;
   if (state.thread) {
     const d = new Date(state.thread.last_synced * 1000);
     $("#thread-meta").textContent =
       `${state.thread.title} · ${state.jobs.length} posts · synced ${d.toLocaleString()}`;
+  } else {
+    $("#thread-meta").textContent = "no data yet — hit Sync";
   }
+  renderMonthPicker();
   render();
 }
 
@@ -804,6 +844,15 @@ $("#search-clear").addEventListener("click", () => {
 });
 $("#sync-btn").addEventListener("click", sync);
 $("#zen-btn").addEventListener("click", toggleZen);
+$("#month-select").addEventListener("change", e => {
+  state.zenIdx = 0; state.closed.clear();  // different posts; persist filters/tab as the lens
+  load(+e.target.value);
+});
+// Cross-month cue: jump to the most recent other month that has follow-ups due.
+$("#followup-elsewhere").addEventListener("click", () => {
+  const t = state.threads.find(t => t.id !== state.threadId && t.followup_due > 0);
+  if (t) { state.zenIdx = 0; state.closed.clear(); load(t.id); }
+});
 
 load();
 </script>
