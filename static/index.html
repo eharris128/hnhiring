@@ -333,10 +333,17 @@ function renderMonthPicker() {
 // threadId optional: absent/null → newest month (initial load + R5 back-compat). Fetches
 // the month list every time so the picker stays correct after a sync, no extra bookkeeping.
 async function load(threadId) {
-  const [threads, data] = await Promise.all([
-    fetch("/api/threads").then(r => r.json()),
-    fetch("/api/jobs" + (threadId ? `?thread_id=${threadId}` : "")).then(r => r.json()),
-  ]);
+  let threads, data;
+  try {
+    const get = async url => { const r = await fetch(url); if (!r.ok) throw new Error(`${url} → ${r.status}`); return r.json(); };
+    [threads, data] = await Promise.all([
+      get("/api/threads"),
+      get("/api/jobs" + (threadId ? `?thread_id=${threadId}` : "")),
+    ]);
+  } catch (e) {
+    alert("Couldn't load that month: " + e.message);  // leaves the current view intact
+    return;
+  }
   state.threads = threads;
   state.jobs = data.jobs;
   state.thread = data.thread;
