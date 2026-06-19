@@ -15,12 +15,15 @@ the inline JS (extract the `<script>` block from `static/index.html`).
 
 ## Architecture (deliberately small — keep it that way)
 
-- `app.py` — FastAPI. Four endpoints: `POST /api/sync`, `GET /api/jobs`,
-  `PATCH /api/jobs/{id}` (favorite/status/notes/applied_via only), and
-  `POST /api/jobs/{id}/apply` — emails an application via `mailer.py` (resume
-  attached), then sets status=applied, applied_via=email, and appends an audit
-  line to notes. `applied_via` ('email' = needs follow-up | 'portal' | NULL)
-  is also set to 'portal' by the frontend when `+` bumps interested→applied.
+- `app.py` — FastAPI. Five endpoints: `POST /api/sync`, `GET /api/jobs`
+  (optional `?thread_id=` — defaults to the newest month, `404` on an unknown id),
+  `GET /api/threads` (every synced month, newest first, each with `job_count` and a
+  `followup_due` count — feeds the month picker), `PATCH /api/jobs/{id}`
+  (favorite/status/notes/applied_via only), and `POST /api/jobs/{id}/apply` — emails
+  an application via `mailer.py` (resume attached), then sets status=applied,
+  applied_via=email, and appends an audit line to notes. `applied_via` ('email' =
+  needs follow-up | 'portal' | NULL) is also set to 'portal' by the frontend when
+  `+` bumps interested→applied.
 - `mailer.py` — Gmail SMTP (app password) with the resume PDF attached.
   Credentials in `mail.json` (gitignored; see `mail.json.example`). Posts whose
   text contains an email get an "✉ Apply" button (compose modal, prefilled
@@ -35,6 +38,12 @@ the inline JS (extract the `<script>` block from `static/index.html`).
   `switzerland OR (remote AND (europe OR worldwide))`.
 - `db.py` — SQLite (`data.db`, gitignored — personal data, local only).
 - `static/index.html` — entire frontend: vanilla JS, no build step, ~1 file.
+  Month selection is frontend state (`state.threadId`); browsing is **strictly
+  per-month** (tabs, filters, search, the ↻ chip, zen all scope to the selected
+  month). The *only* cross-thread signal is `followup_due` (server-computed in
+  `db.list_threads`), which drives the picker's "↻ N due in other months" cue so a
+  follow-up maturing after a month rolls over stays discoverable. `FOLLOWUP_DAYS`
+  is mirrored in `index.html` and `db.py` — keep them equal.
 
 ## Invariants — do not break
 

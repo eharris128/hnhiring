@@ -15,10 +15,17 @@ cd ~/projects/hnhiring
 (First-time setup: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`)
 
 - **Sync** auto-discovers the newest "Who is hiring?" thread — on the 1st of the
-  month it picks up the new thread automatically. Old months stay in the DB.
+  month it picks up the new thread automatically and switches the view to it.
+  Old months stay in the DB and stay browsable any time from the **month picker**
+  in the header (newest selected by default).
 - Your favorites/notes/statuses live in `data.db` (gitignored, this machine only)
-  and are never touched by sync.
-- To sync a specific month: `curl -X POST 'localhost:8000/api/sync?thread_id=<hn story id>'`
+  and are never touched by sync — switching months never disturbs them.
+- Browsing is **per-month**, but if an emailed application goes quiet (past 7 days)
+  in a month you're *not* viewing, a **"↻ N due in other months"** nudge appears by
+  the picker — click it to jump to that month.
+- To pull a specific or older month: `curl -X POST 'localhost:8000/api/sync?thread_id=<hn story id>'`
+  — it then shows up in the month picker alongside the others. (Handy for landing a
+  second month locally to try the picker before the next month's thread is live.)
 
 ## Monthly triage routine
 
@@ -58,5 +65,7 @@ inbox → interested → applied → interviewing → offer / rejected / archive
 - `classify.py` — keyword heuristics → tags (`remote`, `onsite`, `us`, `europe`,
   `switzerland`, `worldwide`).
 - `db.py` — SQLite: `jobs` (refreshed on sync) + `user_state` (yours, preserved).
-- `app.py` — FastAPI: `POST /api/sync`, `GET /api/jobs`, `PATCH /api/jobs/{id}`.
+- `app.py` — FastAPI: `POST /api/sync`, `GET /api/jobs` (optional `?thread_id=`),
+  `GET /api/threads` (the months, for the picker), `PATCH /api/jobs/{id}`,
+  `POST /api/jobs/{id}/apply`.
 - `static/index.html` — the whole frontend; vanilla JS, no build step.
