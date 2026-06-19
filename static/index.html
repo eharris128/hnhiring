@@ -352,6 +352,14 @@ async function load(threadId) {
   render();
 }
 
+// Switch the viewed month: reset zen position and per-month collapse state, but keep
+// the user's filters/tab/search as a persistent lens across months.
+function switchMonth(id) {
+  state.zenIdx = 0;
+  state.closed.clear();
+  load(id);
+}
+
 async function sync() {
   const btn = $("#sync-btn");
   btn.disabled = true; btn.textContent = "Syncing…";
@@ -845,14 +853,11 @@ $("#search-clear").addEventListener("click", () => {
 });
 $("#sync-btn").addEventListener("click", sync);
 $("#zen-btn").addEventListener("click", toggleZen);
-$("#month-select").addEventListener("change", e => {
-  state.zenIdx = 0; state.closed.clear();  // different posts; persist filters/tab as the lens
-  load(+e.target.value);
-});
+$("#month-select").addEventListener("change", e => switchMonth(+e.target.value));
 // Cross-month cue: jump to the most recent other month that has follow-ups due.
 $("#followup-elsewhere").addEventListener("click", () => {
   const t = state.threads.find(t => t.id !== state.threadId && t.followup_due > 0);
-  if (t) { state.zenIdx = 0; state.closed.clear(); load(t.id); }
+  if (t) switchMonth(t.id);
 });
 
 load();
