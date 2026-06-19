@@ -9,6 +9,11 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "data.db"
 
+# Follow-up window, mirrored from the frontend's FOLLOWUP_DAYS (index.html). An emailed
+# application that has sat in 'applied' this many days with no reminder is "due". Used by
+# list_threads to surface a cross-month follow-up cue on the picker. KEEP THESE EQUAL.
+FOLLOWUP_DAYS = 7
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS threads (
     id          INTEGER PRIMARY KEY,
@@ -143,3 +148,30 @@ def update_user_state(conn: sqlite3.Connection, job_id: int, fields: dict) -> di
 def latest_thread(conn: sqlite3.Connection) -> dict | None:
     row = conn.execute("SELECT * FROM threads ORDER BY time DESC LIMIT 1").fetchone()
     return dict(row) if row else None
+
+
+def get_thread(conn: sqlite3.Connection, thread_id: int) -> dict | None:
+    row = conn.execute("SELECT * FROM threads WHERE id = ?", (thread_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_threads(conn: sqlite3.Connection) -> list[dict]:
+    """Every synced month, newest first, with two per-month counts: job_count, and
+    followup_due — emailed applications past the follow-up window with no reminder yet
+    (the same predicate the frontend's followupDue uses). followup_due drives the
+    picker's cross-month cue so per-month browsing doesn't strand post-rollover nudges.
+    LEFT JOINs so a thread with zero kept posts still appears (both counts 0)."""
+    cutoff = int(time.time()) - FOLLOWUP_DAYS * 86400
+    rows = conn.execute(
+        """SELECT t.*, COUNT(j.id) AS job_count,
+                  COALESCE(SUM(CASE WHEN u.status = 'applied' AND u.applied_via = 'email'
+                                     AND u.applied_at IS NOT NULL AND u.reminded_at IS NULL
+                                     AND u.applied_at <= ?
+                                    THEN 1 ELSE 0 END), 0) AS followup_due
+           FROM threads t
+           LEFT JOIN jobs j ON j.thread_id = t.id
+           LEFT JOIN user_state u ON u.job_id = j.id
+           GROUP BY t.id ORDER BY t.time DESC""",
+        (cutoff,),
+    ).fetchall()
+    return [dict(r) for r in rows]

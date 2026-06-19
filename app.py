@@ -43,12 +43,31 @@ def index():
 
 
 @app.get("/api/jobs")
-def get_jobs():
+def get_jobs(thread_id: int | None = None):
+    """Jobs for one month. No thread_id → newest month (back-compat, drives initial load);
+    a known id → that month; an unknown id → 404 (unreachable from the UI, which only
+    offers months it listed via /api/threads)."""
     conn = db.connect()
     try:
-        thread = db.latest_thread(conn)
-        jobs = db.list_jobs(conn, thread["id"] if thread else None)
+        if thread_id is None:
+            thread = db.latest_thread(conn)
+        else:
+            thread = db.get_thread(conn, thread_id)
+            if thread is None:
+                raise HTTPException(404, "unknown thread id")
+        jobs = db.list_jobs(conn, thread["id"]) if thread else []
         return {"thread": thread, "jobs": jobs}
+    finally:
+        conn.close()
+
+
+@app.get("/api/threads")
+def get_threads():
+    """Every synced month for the picker — newest first, each with job_count and a
+    followup_due count (the cross-month follow-up cue)."""
+    conn = db.connect()
+    try:
+        return db.list_threads(conn)
     finally:
         conn.close()
 
