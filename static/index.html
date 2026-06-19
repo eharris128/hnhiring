@@ -358,7 +358,8 @@ async function sync() {
   try {
     const r = await fetch("/api/sync", { method: "POST" });
     if (!r.ok) throw new Error(await r.text());
-    await load();
+    const { thread_id } = await r.json();  // the just-pulled month
+    await load(thread_id);                 // switch to it + refresh the picker
   } catch (e) {
     alert("Sync failed: " + e.message);
   } finally {
