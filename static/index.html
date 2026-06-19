@@ -22,9 +22,16 @@
          max-width: 1100px; margin: 0 auto; }
   .bar h1 { font-size: 17px; margin: 0; color: var(--accent); white-space: nowrap; }
   .bar .meta { color: var(--dim); font-size: 12.5px; }
-  #search { flex: 1; min-width: 220px; background: var(--bg); color: var(--text);
-            border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 14px; }
+  .search-wrap { flex: 1; min-width: 220px; position: relative; display: flex; }
+  #search { flex: 1; background: var(--bg); color: var(--text);
+            border: 1px solid var(--border); border-radius: 8px; padding: 8px 32px 8px 12px; font-size: 14px; }
   #search:focus { outline: none; border-color: var(--accent2); }
+  #search::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+  #search-clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+                  background: none; border: none; border-radius: 50%; padding: 0;
+                  width: 22px; height: 22px; line-height: 1; font-size: 18px;
+                  color: var(--dim); cursor: pointer; }
+  #search-clear:hover { color: var(--text); border: none; }
   button { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
            border-radius: 8px; padding: 7px 14px; font-size: 13.5px; cursor: pointer; }
   button:hover { border-color: var(--accent2); }
@@ -67,6 +74,10 @@
   .card-meta { color: var(--dim); font-size: 12px; margin-top: 6px; }
   .status-pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; margin-left: 8px;
                  background: var(--panel2); border: 1px solid var(--border); color: var(--accent2); }
+  .status-pill.due { color: var(--bad); border-color: var(--bad); }
+  .chip.due { color: var(--bad); border-color: var(--bad); }
+  .chip.due.on { background: var(--bad); border-color: var(--bad); color: #1a0c0c; }
+  .remind-btn { color: var(--bad); border-color: var(--bad); }
 
   .card-body { display: none; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
   .card.open .card-body { display: block; }
@@ -119,7 +130,10 @@
   <div class="bar">
     <h1>HN Hiring</h1>
     <span class="meta" id="thread-meta">no data yet — hit Sync</span>
-    <input id="search" type="search" placeholder="Search company, tech, keywords…">
+    <div class="search-wrap">
+      <input id="search" type="search" placeholder="Search company, tech, keywords…">
+      <button id="search-clear" type="button" title="Clear search" hidden>×</button>
+    </div>
     <button id="zen-btn" title="One card at a time (z)">Zen</button>
     <button class="primary" id="sync-btn">Sync</button>
   </div>
@@ -129,6 +143,7 @@
     <button class="chip" data-f="swiss">Swiss-friendly</button>
     <button class="chip" data-f="fav">★ Favorites</button>
     <button class="chip" data-f="noted">Has notes</button>
+    <button class="chip" data-f="followup" id="chip-followup" title="Emailed applications gone quiet past 7 days">↻ Follow-up</button>
   </div>
   <div class="tabs" id="tabs"></div>
 </header>
@@ -262,6 +277,23 @@ Evan`;
 // Apply only makes sense before an application exists (and with an email to send to).
 const canApply = j => ["inbox", "interested", "later"].includes(j.status) && emailsIn(j).length > 0;
 
+// ---- follow-up: email applications that have gone quiet ----
+// applied_at / reminded_at are unix seconds stamped server-side (db.py). A post is
+// "follow-up due" once an emailed application has sat in `applied` past the window
+// with no reminder yet. Derived in the frontend, like Swiss-friendly — nothing stored.
+const FOLLOWUP_DAYS = 7;
+const DAY = 86400;
+const nowSec = () => Math.floor(Date.now() / 1000);
+const daysSince = ts => Math.floor((nowSec() - ts) / DAY);
+const followupDue = j => j.status === "applied" && j.applied_via === "email"
+  && j.applied_at && !j.reminded_at && (nowSec() - j.applied_at) >= FOLLOWUP_DAYS * DAY;
+// The exact address applied to lives in the "✉ applied … → addr" audit line; fall
+// back to the first address scraped from the post.
+function appliedToAddr(j) {
+  const m = (j.notes || "").match(/✉ applied \d{4}-\d{2}-\d{2} → (\S+@\S+)/);
+  return (m && m[1]) || emailsIn(j)[0] || "";
+}
+
 const isRemote = j => j.tags.includes("remote");
 const isUS = j => j.tags.includes("us");
 const isSwiss = j => j.tags.includes("switzerland") ||
@@ -313,6 +345,7 @@ function visible() {
     if (state.filters.has("swiss") && !isSwiss(j)) return false;
     if (state.filters.has("fav") && !j.favorite) return false;
     if (state.filters.has("noted") && !j.notes.trim()) return false;
+    if (state.filters.has("followup") && !followupDue(j)) return false;
     if (q && !(j.text.toLowerCase().includes(q) || j.author.toLowerCase().includes(q)
                || j.notes.toLowerCase().includes(q))) return false;
     return true;
@@ -341,6 +374,18 @@ function badgesFor(j) {
   return b.join("");
 }
 
+// Lifecycle pill for applications: due-for-follow-up (warning), already-reminded,
+// or just the age since applying. Empty for everything pre-application.
+function followupPill(j) {
+  if (followupDue(j))
+    return `<span class="status-pill due">↻ follow up · applied ${daysSince(j.applied_at)}d ago</span>`;
+  if (j.reminded_at)
+    return `<span class="status-pill">↻ reminded ${daysSince(j.reminded_at)}d ago</span>`;
+  if (j.status === "applied" && j.applied_at)
+    return `<span class="status-pill">applied ${daysSince(j.applied_at)}d ago</span>`;
+  return "";
+}
+
 function cardHTML(j, forceOpen = false) {
   return `
     <div class="card ${j.favorite ? "fav" : ""} ${j.status === "archived" ? "archived" : ""} ${forceOpen || !state.closed.has(j.id) ? "open" : ""}" data-id="${j.id}">
@@ -353,6 +398,7 @@ function cardHTML(j, forceOpen = false) {
             · <a href="https://news.ycombinator.com/item?id=${j.id}" target="_blank" rel="noopener">HN ↗</a>
             ${j.status !== "inbox" ? `<span class="status-pill">${j.status}</span>` : ""}
             ${j.applied_via ? `<span class="status-pill">${j.applied_via === "email" ? "✉ email" : "🔗 portal"}</span>` : ""}
+            ${followupPill(j)}
             ${j.notes.trim() ? `<span class="status-pill">📝</span>` : ""}
           </div>
         </div>
@@ -372,6 +418,7 @@ function cardHTML(j, forceOpen = false) {
             </select>
           </label>
           ${canApply(j) ? `<button class="apply-btn" title="Email an application, resume attached">✉ Apply</button>` : ""}
+          ${followupDue(j) ? `<button class="remind-btn" title="Send a follow-up reminder, resume re-attached">↻ Send reminder</button>` : ""}
           <span class="saved">saved ✓</span>
         </div>
         <textarea class="notes" placeholder="Notes — contacts, application date, follow-ups…">${esc(j.notes)}</textarea>
@@ -381,6 +428,11 @@ function cardHTML(j, forceOpen = false) {
 
 function render() {
   renderTabs();
+  // Surface the follow-up count right on the chip — it's the actionable one.
+  const dueCount = state.jobs.filter(followupDue).length;
+  const chip = $("#chip-followup");
+  chip.textContent = dueCount ? `↻ Follow-up (${dueCount})` : "↻ Follow-up";
+  chip.classList.toggle("due", dueCount > 0);
   const jobs = visible();
   state.zenIdx = Math.max(0, Math.min(state.zenIdx, jobs.length - 1));
   if (state.zen) {
@@ -393,7 +445,7 @@ function render() {
         <button id="zen-next" ${state.zenIdx >= jobs.length - 1 ? "disabled" : ""}>→</button>
         <span class="zen-keys">
           <kbd>←</kbd><kbd>→</kbd> move · <kbd>+</kbd> bump · <kbd>x</kbd> archive ·
-          <kbd>f</kbd> fav · <kbd>l</kbd> later · <kbd>a</kbd> apply · <kbd>i</kbd> interested tab · <kbd>n</kbd> notes · <kbd>z</kbd>/<kbd>Esc</kbd> exit
+          <kbd>f</kbd> fav · <kbd>l</kbd> later · <kbd>r</kbd> reject · <kbd>a</kbd> apply/remind · <kbd>i</kbd> interested tab · <kbd>n</kbd> notes · <kbd>z</kbd>/<kbd>Esc</kbd> exit
         </span>
       </div>` +
       (j ? cardHTML(j, true) : '<div class="empty">Nothing matches the current filters.</div>');
@@ -432,18 +484,59 @@ function zenStep(actedId) {
 }
 
 // ---- apply-by-email modal ----
+// The same compose modal serves two jobs: a fresh application ('application') and
+// a follow-up nudge ('reminder'). composeKind decides the template, the pitch row's
+// visibility, and what the send does on success.
 let applyJobId = null;
+let composeKind = "application";
 
 $("#apply-pitch").innerHTML = Object.entries(PITCHES).map(([k, p]) =>
   `<option value="${k}">${p.label}</option>`).join("");
 
+// Reminder body: short, references how long it's been, re-attaches the resume. No
+// pitch — this is a nudge, not a re-pitch.
+function reminderTemplate(j, to) {
+  const days = j.applied_at ? daysSince(j.applied_at) : 0;
+  const when = j.applied_at ? new Date(j.applied_at * 1000).toLocaleDateString() : "recently";
+  const [company] = titleParts(j);
+  return `Hi ${greetName(to)},
+
+I'm following up on my application${company ? ` to ${company}` : ""}, sent on ${when} (${days} day${days === 1 ? "" : "s"} ago) in response to your HN Who's Hiring post.
+
+I'm still very interested and wanted to make sure it reached you. I'd be glad to share more or answer any questions.
+
+I've re-attached my resume for convenience — more at my [personal website](https://evanharris.dev/).
+
+Best,
+Evan`;
+}
+
 function openApply(j) {
+  composeKind = "application";
   applyJobId = j.id;
   const [company, role] = titleParts(j);
+  $("#apply-pitch").closest("label").style.display = "";
   $("#apply-title").textContent = `Apply — ${company || j.title}`;
   $("#apply-to").value = emailsIn(j)[0] || "";
   $("#apply-subject").value = role ? `HN Who's Hiring: ${role}` : `HN Who's Hiring: ${j.title}`;
   $("#apply-body").value = applyTemplate(j, $("#apply-pitch").value, $("#apply-to").value);
+  fillApplyJobPanel(j);
+}
+
+function openReminder(j) {
+  composeKind = "reminder";
+  applyJobId = j.id;
+  const [company, role] = titleParts(j);
+  const to = appliedToAddr(j);
+  $("#apply-pitch").closest("label").style.display = "none";  // nudge, no re-pitch
+  $("#apply-title").textContent = `Follow up — ${company || j.title}`;
+  $("#apply-to").value = to;
+  $("#apply-subject").value = role ? `Following up: ${role}` : "Following up on my application";
+  $("#apply-body").value = reminderTemplate(j, to);
+  fillApplyJobPanel(j);
+}
+
+function fillApplyJobPanel(j) {
   $("#apply-job").innerHTML = `
     <h3>${esc(j.title)}</h3>
     <div class="badges">${badgesFor(j)}</div>
@@ -462,6 +555,7 @@ function openApply(j) {
 
 // Switching pitch rebuilds the body from the template (drops manual edits).
 $("#apply-pitch").addEventListener("change", () => {
+  if (composeKind !== "application") return;
   const j = state.jobs.find(j => j.id === applyJobId);
   if (j) $("#apply-body").value = applyTemplate(j, $("#apply-pitch").value, $("#apply-to").value);
 });
@@ -480,10 +574,11 @@ async function sendApply(test = false) {
       !confirm("The body still contains the [EDIT ME] placeholder — send anyway?")) return;
 
   const jobId = applyJobId;  // capture before closeApply() nulls it
+  const kind = composeKind;  // capture too — he may open another compose mid-send
   const post = () => fetch(`/api/jobs/${jobId}/apply`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ to, subject, body, test }),
+    body: JSON.stringify({ to, subject, body, test, kind }),
   }).then(async r => {
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
     return r.json();
@@ -501,6 +596,33 @@ async function sendApply(test = false) {
       alert("Test send failed: " + e.message);
     } finally {
       btn.disabled = false;
+    }
+    return;
+  }
+
+  if (kind === "reminder") {  // nudge: optimistic, leaves status/applied_via/applied_at alone
+    const j = state.jobs.find(j => j.id === jobId);
+    const prevReminded = j.reminded_at, prevNotes = j.notes;
+    j.reminded_at = nowSec();  // clears it from the follow-up bucket immediately
+    closeApply();
+    zenStep(jobId);
+    render();
+    try {
+      const u = await post();
+      Object.assign(j, { notes: u.notes, reminded_at: u.reminded_at });
+      render();
+    } catch (e) {
+      j.reminded_at = prevReminded; j.notes = prevNotes;
+      render();
+      if ($("#apply-modal").hidden) {
+        alert(`Reminder to ${to} failed: ${e.message}\n\nReopening your draft.`);
+        openReminder(j);
+        $("#apply-to").value = to;
+        $("#apply-subject").value = subject;
+        $("#apply-body").value = body;
+      } else {
+        alert(`Reminder to ${to} failed: ${e.message}\n\n"${j.title.slice(0, 60)}" is still due for follow-up.`);
+      }
     }
     return;
   }
@@ -562,6 +684,8 @@ $("#list").addEventListener("click", async e => {
     render();
   } else if (e.target.closest(".apply-btn")) {
     openApply(j);
+  } else if (e.target.closest(".remind-btn")) {
+    openReminder(j);
   } else if (e.target.closest(".act.plus")) {
     await patch(id, bumpFields(j));
     zenStep(id);
@@ -610,9 +734,15 @@ document.addEventListener("keydown", async e => {
   } else if (e.key === "l") {
     await patch(j.id, { status: "later" });
     zenStep(j.id); render();
+  } else if (e.key === "r") {
+    await patch(j.id, { status: "rejected" });
+    zenStep(j.id); render();
   } else if (e.key === "a" && canApply(j)) {
     e.preventDefault();  // don't let the "a" keystroke type into the focused body
     openApply(j);
+  } else if (e.key === "a" && followupDue(j)) {
+    e.preventDefault();  // applied cards can't Apply, so "a" nudges instead
+    openReminder(j);
   } else if (e.key === "n") {
     e.preventDefault();
     $("#list .notes")?.focus();
@@ -659,7 +789,19 @@ $("#tabs").addEventListener("click", e => {
   render();
 });
 
-$("#search").addEventListener("input", debounce(e => { state.q = e.target.value; render(); }, 200));
+const toggleSearchClear = () => { $("#search-clear").hidden = !$("#search").value; };
+const searchInput = debounce(v => { state.q = v; render(); }, 200);
+$("#search").addEventListener("input", e => {
+  toggleSearchClear();  // immediate, so the × tracks typing without the search debounce
+  searchInput(e.target.value);
+});
+$("#search-clear").addEventListener("click", () => {
+  const s = $("#search");
+  s.value = ""; state.q = "";
+  toggleSearchClear();
+  s.focus();
+  render();
+});
 $("#sync-btn").addEventListener("click", sync);
 $("#zen-btn").addEventListener("click", toggleZen);
 

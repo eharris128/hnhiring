@@ -1,6 +1,8 @@
 """SQLite storage: job posts (refreshed on sync) and user state (never clobbered)."""
 
+import calendar
 import json
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -31,20 +33,46 @@ CREATE TABLE IF NOT EXISTS user_state (
     status      TEXT NOT NULL DEFAULT 'inbox',
     notes       TEXT NOT NULL DEFAULT '',
     applied_via TEXT,                -- 'email' (follow up) | 'portal' | NULL
+    applied_at  INTEGER,             -- unix secs first entered 'applied' (drives follow-up timing)
+    reminded_at INTEGER,             -- unix secs a follow-up reminder was sent (NULL = none yet)
     updated_at  INTEGER
 );
 """
+
+# Audit line the apply endpoint writes ("✉ applied 2026-06-08 → x@y.com"); used to
+# backfill applied_at for applications made before that column existed.
+_APPLIED_NOTE_RE = re.compile(r"✉ applied (\d{4})-(\d{2})-(\d{2})")
 
 
 def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
-    # Migrate pre-applied_via databases (CREATE IF NOT EXISTS won't add columns).
+    # Migrate older databases (CREATE IF NOT EXISTS won't add columns).
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(user_state)")}
     if "applied_via" not in cols:
         conn.execute("ALTER TABLE user_state ADD COLUMN applied_via TEXT")
+    if "reminded_at" not in cols:
+        conn.execute("ALTER TABLE user_state ADD COLUMN reminded_at INTEGER")
+    if "applied_at" not in cols:
+        conn.execute("ALTER TABLE user_state ADD COLUMN applied_at INTEGER")
+        _backfill_applied_at(conn)
+    conn.commit()
     return conn
+
+
+def _backfill_applied_at(conn: sqlite3.Connection) -> None:
+    """Seed applied_at for existing email applications from their notes audit line.
+    Uses noon UTC of the recorded day to stay clear of timezone edges. Rows without
+    an audit line (e.g. bulk-marked) stay NULL and simply won't surface for follow-up."""
+    for r in conn.execute(
+        "SELECT job_id, notes FROM user_state WHERE status = 'applied' AND applied_via = 'email'"
+    ).fetchall():
+        m = _APPLIED_NOTE_RE.search(r["notes"] or "")
+        if not m:
+            continue
+        ts = calendar.timegm((int(m[1]), int(m[2]), int(m[3]), 12, 0, 0, 0, 0, 0))
+        conn.execute("UPDATE user_state SET applied_at = ? WHERE job_id = ?", (ts, r["job_id"]))
 
 
 def upsert_jobs(conn: sqlite3.Connection, thread: dict, jobs: list[dict]) -> None:
@@ -69,7 +97,9 @@ def list_jobs(conn: sqlite3.Connection, thread_id: int | None = None) -> list[di
         f"""SELECT j.*, COALESCE(u.favorite, 0) AS favorite,
                    COALESCE(u.status, 'inbox') AS status,
                    COALESCE(u.notes, '') AS notes,
-                   u.applied_via AS applied_via
+                   u.applied_via AS applied_via,
+                   u.applied_at AS applied_at,
+                   u.reminded_at AS reminded_at
             FROM jobs j LEFT JOIN user_state u ON u.job_id = j.id
             {where} ORDER BY j.time DESC""",
         params,
@@ -84,7 +114,8 @@ def list_jobs(conn: sqlite3.Connection, thread_id: int | None = None) -> list[di
 
 
 def update_user_state(conn: sqlite3.Connection, job_id: int, fields: dict) -> dict:
-    allowed = {k: v for k, v in fields.items() if k in ("favorite", "status", "notes", "applied_via")}
+    allowed = {k: v for k, v in fields.items()
+               if k in ("favorite", "status", "notes", "applied_via", "applied_at", "reminded_at")}
     if "favorite" in allowed:
         allowed["favorite"] = int(bool(allowed["favorite"]))
     conn.execute(
@@ -92,6 +123,12 @@ def update_user_state(conn: sqlite3.Connection, job_id: int, fields: dict) -> di
         "ON CONFLICT(job_id) DO NOTHING",
         (job_id, int(time.time())),
     )
+    # Stamp the applied date the first time a post enters 'applied' (any path: apply
+    # endpoint, + bump, or the status dropdown). This is what drives follow-up timing.
+    if allowed.get("status") == "applied" and "applied_at" not in allowed:
+        row = conn.execute("SELECT applied_at FROM user_state WHERE job_id = ?", (job_id,)).fetchone()
+        if not row or row["applied_at"] is None:
+            allowed["applied_at"] = int(time.time())
     if allowed:
         sets = ", ".join(f"{k} = ?" for k in allowed)
         conn.execute(

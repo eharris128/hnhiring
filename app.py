@@ -31,6 +31,7 @@ class ApplyRequest(BaseModel):
     subject: str
     body: str
     test: bool = False  # send to mail.json's test_address instead; no state change
+    kind: str = "application"  # 'application' (mark applied) | 'reminder' (follow-up nudge)
 
 
 STATUSES = {"inbox", "interested", "later", "applied", "interviewing", "offer", "rejected", "archived"}
@@ -65,7 +66,11 @@ async def sync(thread_id: int | None = None):
 
 @app.post("/api/jobs/{job_id}/apply")
 def apply(job_id: int, req: ApplyRequest):
-    """Email an application (resume attached), then mark the post applied."""
+    """Email an application (resume attached) and mark the post applied, or — when
+    kind='reminder' — send a follow-up nudge and stamp reminded_at without touching
+    the application's status/channel/date."""
+    if req.kind not in ("application", "reminder"):
+        raise HTTPException(422, "kind must be 'application' or 'reminder'")
     conn = db.connect()
     try:
         exists = conn.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone()
@@ -87,10 +92,15 @@ def apply(job_id: int, req: ApplyRequest):
             raise HTTPException(502, f"send failed: {e}")
         if req.test:
             return {"test": True, "to": to}
-        # Audit trail in notes, then bump the pipeline stage.
         row = conn.execute("SELECT notes FROM user_state WHERE job_id = ?", (job_id,)).fetchone()
         notes = (row["notes"] if row else "") or ""
         stamp = time.strftime("%Y-%m-%d")
+        if req.kind == "reminder":
+            # Record the nudge; clears it from the follow-up bucket, leaves status alone.
+            notes = f"{notes.rstrip()}\n↻ reminder sent {stamp} → {req.to}".strip()
+            return db.update_user_state(
+                conn, job_id, {"notes": notes, "reminded_at": int(time.time())})
+        # Application: audit trail in notes, then mark applied (applied_at auto-stamped).
         notes = f"{notes.rstrip()}\n✉ applied {stamp} → {req.to}".strip()
         return db.update_user_state(
             conn, job_id, {"status": "applied", "notes": notes, "applied_via": "email"})
