@@ -86,7 +86,8 @@
   .post p { margin: 8px 0; }
   .controls { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
   select { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
-           border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+           border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
+  select:disabled { cursor: not-allowed; }
   textarea { width: 100%; min-height: 70px; margin-top: 10px; background: var(--bg);
              color: var(--text); border: 1px solid var(--border); border-radius: 8px;
              padding: 9px 12px; font: 13.5px/1.5 inherit; resize: vertical; }
