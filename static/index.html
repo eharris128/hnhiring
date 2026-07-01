@@ -132,8 +132,6 @@
     <h1>HN Hiring</h1>
     <span class="meta" id="thread-meta">no data yet — hit Sync</span>
     <select id="month-select" title="Switch month" hidden></select>
-    <button id="followup-elsewhere" class="chip due" hidden
-            title="Follow-ups due in months you're not viewing — click to jump there"></button>
     <div class="search-wrap">
       <input id="search" type="search" placeholder="Search company, tech, keywords…">
       <button id="search-clear" type="button" title="Clear search" hidden>×</button>
@@ -255,7 +253,16 @@ I resonate with Andrej Karpathy's goal of not writing another line of code by ha
 const GENERIC_LOCAL = new Set(["careers", "jobs", "info", "hiring", "hello", "contact",
                                "team", "talent", "recruiting", "recruitment", "hr",
                                "apply", "work", "join", "mail", "admin", "office"]);
+// Template-pattern addresses some posts list ("first.last@acme.com" = "figure out the
+// person's name"). The domain takes mail so the composer still opens, but the greeting
+// must never be "Hi First," → fall back to "there", and sendApply confirms before
+// letting one go out as-is (Evan has to resolve the real recipient himself).
+const PLACEHOLDER_LOCAL = new Set(["first", "last", "firstname", "lastname", "fname",
+                                   "lname", "name", "surname", "yourname"]);
+const placeholderAddr = to =>
+  (to.split("@")[0] || "").toLowerCase().split(/[._+-]/).some(w => PLACEHOLDER_LOCAL.has(w));
 function greetName(to) {
+  if (placeholderAddr(to)) return "there";
   const first = (to.split("@")[0] || "").split("+")[0].split(/[._-]/)[0];
   if (!/^[a-z]+$/i.test(first) || GENERIC_LOCAL.has(first.toLowerCase())) return "there";
   return first[0].toUpperCase() + first.slice(1).toLowerCase();
@@ -306,9 +313,9 @@ const isSwiss = j => j.tags.includes("switzerland") ||
 // HN title → short month label: "Ask HN: Who is hiring? (June 2026)" → "June 2026".
 const monthLabel = t => (t.title.match(/\(([^)]+)\)/) || [])[1] || t.title;
 
-// The month picker plus its cross-month follow-up cue. Browsing stays per-month; the
-// only signal that crosses months is followup_due (server-computed in /api/threads),
-// so an application maturing after a rollover stays visible from the default view.
+// The month picker. Browsing stays per-month; the only signal that crosses months is
+// followup_due (server-computed in /api/threads), surfaced per option as `· ↻N` so an
+// application maturing after a rollover stays discoverable when you open the picker.
 function renderMonthPicker() {
   const sel = $("#month-select");
   if (!state.threads.length) {
@@ -321,14 +328,6 @@ function renderMonthPicker() {
       return `<option value="${t.id}" ${t.id === state.threadId ? "selected" : ""}>${esc(monthLabel(t))} · ${t.job_count}${due}</option>`;
     }).join("");
   }
-  // Always-visible cue: follow-ups due in months OTHER than the one in view (the
-  // current month's are already on the in-card ↻ chip). Hidden when none.
-  const elsewhere = state.threads
-    .filter(t => t.id !== state.threadId)
-    .reduce((n, t) => n + (t.followup_due || 0), 0);
-  const btn = $("#followup-elsewhere");
-  btn.hidden = !elsewhere;
-  btn.textContent = elsewhere ? `↻ ${elsewhere} due in other months` : "";
 }
 
 // threadId optional: absent/null → newest month (initial load + R5 back-compat). Fetches
@@ -550,19 +549,15 @@ let composeKind = "application";
 $("#apply-pitch").innerHTML = Object.entries(PITCHES).map(([k, p]) =>
   `<option value="${k}">${p.label}</option>`).join("");
 
-// Reminder body: short, references how long it's been, re-attaches the resume. No
-// pitch — this is a nudge, not a re-pitch.
-function reminderTemplate(j, to) {
-  const days = j.applied_at ? daysSince(j.applied_at) : 0;
-  const when = j.applied_at ? new Date(j.applied_at * 1000).toLocaleDateString() : "recently";
-  const [company] = titleParts(j);
+// Reminder body: a fixed check-in note, greeting by first name when the applied-to
+// address reveals one (greetName), else "there". No pitch — this is a nudge, not a
+// re-pitch; the mailer still attaches the resume.
+function reminderTemplate(to) {
   return `Hi ${greetName(to)},
 
-I'm following up on my application${company ? ` to ${company}` : ""}, sent on ${when} (${days} day${days === 1 ? "" : "s"} ago) in response to your HN Who's Hiring post.
+Wanted to check in.
 
-I'm still very interested and wanted to make sure it reached you. I'd be glad to share more or answer any questions.
-
-I've re-attached my resume for convenience — more at my [personal website](https://evanharris.dev/).
+Are you still recruiting for this role?
 
 Best,
 Evan`;
@@ -589,7 +584,7 @@ function openReminder(j) {
   $("#apply-title").textContent = `Follow up — ${company || j.title}`;
   $("#apply-to").value = to;
   $("#apply-subject").value = role ? `Following up: ${role}` : "Following up on my application";
-  $("#apply-body").value = reminderTemplate(j, to);
+  $("#apply-body").value = reminderTemplate(to);
   fillApplyJobPanel(j);
 }
 
@@ -627,6 +622,8 @@ async function sendApply(test = false) {
   const subject = $("#apply-subject").value.trim();
   const body = $("#apply-body").value;
   if (!to && !test) { alert("No recipient."); return; }
+  if (!test && placeholderAddr(to) &&
+      !confirm(`"${to}" looks like a placeholder pattern (first.last@…) — it needs the real person's address. Send anyway?`)) return;
   if (!test && body.includes("EDIT ME") &&
       !confirm("The body still contains the [EDIT ME] placeholder — send anyway?")) return;
 
@@ -862,11 +859,6 @@ $("#search-clear").addEventListener("click", () => {
 $("#sync-btn").addEventListener("click", sync);
 $("#zen-btn").addEventListener("click", toggleZen);
 $("#month-select").addEventListener("change", e => switchMonth(+e.target.value));
-// Cross-month cue: jump to the most recent other month that has follow-ups due.
-$("#followup-elsewhere").addEventListener("click", () => {
-  const t = state.threads.find(t => t.id !== state.threadId && t.followup_due > 0);
-  if (t) switchMonth(t.id);
-});
 
 load();
 </script>

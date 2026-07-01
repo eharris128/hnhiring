@@ -41,7 +41,7 @@ the inline JS (extract the `<script>` block from `static/index.html`).
   Month selection is frontend state (`state.threadId`); browsing is **strictly
   per-month** (tabs, filters, search, the ↻ chip, zen all scope to the selected
   month). The *only* cross-thread signal is `followup_due` (server-computed in
-  `db.list_threads`), which drives the picker's "↻ N due in other months" cue so a
+  `db.list_threads`), surfaced per option in the month picker as `· ↻N` so a
   follow-up maturing after a month rolls over stays discoverable. `FOLLOWUP_DAYS`
   is mirrored in `index.html` and `db.py` — keep them equal.
 
