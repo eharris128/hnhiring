@@ -260,10 +260,12 @@ I resonate with Andrej Karpathy's goal of not writing another line of code by ha
   },
 };
 
-// "sid@augusthealth.com" → "Sid"; role addresses ("careers@", "jobs@") → "there".
+// "sid@augusthealth.com" → "Sid"; role addresses ("careers@", "jobs@") → "there". "hn"
+// is a routing tag some posts use to mark HN-sourced applicants (e.g. "hn@acme.com",
+// "jobs-hn@acme.com" → local "hn" after the +/. /- split) — never a person's name.
 const GENERIC_LOCAL = new Set(["careers", "jobs", "info", "hiring", "hello", "contact",
                                "team", "talent", "recruiting", "recruitment", "hr",
-                               "apply", "work", "join", "mail", "admin", "office"]);
+                               "apply", "work", "join", "mail", "admin", "office", "hn"]);
 // Template-pattern addresses some posts list ("first.last@acme.com" = "figure out the
 // person's name"). The domain takes mail so the composer still opens, but the greeting
 // must never be "Hi First," → fall back to "there", and sendApply confirms before
