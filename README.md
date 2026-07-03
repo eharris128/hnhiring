@@ -26,6 +26,10 @@ cd ~/projects/hnhiring
 - To pull a specific or older month: `curl -X POST 'localhost:8000/api/sync?thread_id=<hn story id>'`
   — it then shows up in the month picker alongside the others. (Handy for landing a
   second month locally to try the picker before the next month's thread is live.)
+- Sync also auto-files any untriaged post under **skip** if its company already
+  rejected a portal application from you in a past month (a toast reports how
+  many). It never touches a post you've already triaged — check the **Skip** tab
+  occasionally in case it misfires on a same-named company.
 
 ## Monthly triage routine
 
@@ -35,12 +39,17 @@ cd ~/projects/hnhiring
 
    | key | action |
    |-----|--------|
-   | `+` / `i` | bump a stage (inbox → interested → applied → …) and advance |
+   | `+` | bump a stage (inbox → interested → applied → …) and advance |
    | `x` | archive and advance (on archived: restore to inbox) |
+   | `l` | send to Later (parking lot) and advance |
+   | `r` | reject and advance |
+   | `a` | open the ✉ Apply compose modal (or, on an applied post past follow-up, a reminder nudge) |
    | `→` / `j`, `←` / `k` | next / previous |
    | `f` | favorite |
    | `n` | jump to notes (`Esc` to jump back) |
+   | `i` | jump to the Interested tab |
    | `z` / `Esc` | toggle Zen |
+   | `Ctrl`/`Cmd`+`z` | undo the last pile move (single level) |
 
 4. Switch to the **Interested** tab for the second pass: read properly, take
    notes, apply, and advance statuses (`+` or the dropdown).
@@ -55,7 +64,8 @@ cd ~/projects/hnhiring
 
 ## Pipeline statuses
 
-inbox → interested → applied → interviewing → offer / rejected / archived
+inbox → interested → applied → interviewing → offer / rejected / archived,
+plus `later` (parking lot) and `skip` (auto-filed re-postings, see above).
 
 ## How it works
 
@@ -63,9 +73,16 @@ inbox → interested → applied → interviewing → offer / rejected / archive
   fetches the story and all its top-level comments from
   `hacker-news.firebaseio.com/v0/item/<id>.json` (50 concurrent, skips dead/deleted).
 - `classify.py` — keyword heuristics → tags (`remote`, `onsite`, `us`, `europe`,
-  `switzerland`, `worldwide`).
+  `switzerland`, `worldwide`), plus `extract_company` (normalized company name from
+  the post title, used for the auto-skip check below).
 - `db.py` — SQLite: `jobs` (refreshed on sync) + `user_state` (yours, preserved).
+  `auto_skip_reapplied` runs on every sync and pre-files untriaged posts as
+  `skip` when their company already rejected a portal application in a past
+  month.
+- `mailer.py` — sends the ✉ Apply emails through Gmail SMTP (resume PDF
+  attached; credentials in `mail.json`, gitignored — see `mail.json.example`).
 - `app.py` — FastAPI: `POST /api/sync`, `GET /api/jobs` (optional `?thread_id=`),
   `GET /api/threads` (the months, for the picker), `PATCH /api/jobs/{id}`,
-  `POST /api/jobs/{id}/apply`.
+  `POST /api/jobs/{id}/apply` (send an application, or with `kind: "reminder"`,
+  a follow-up nudge).
 - `static/index.html` — the whole frontend; vanilla JS, no build step.
