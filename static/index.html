@@ -78,6 +78,7 @@
   .chip.due { color: var(--bad); border-color: var(--bad); }
   .chip.due.on { background: var(--bad); border-color: var(--bad); color: #1a0c0c; }
   .remind-btn { color: var(--bad); border-color: var(--bad); }
+  .apply-btn.found { color: var(--good); border-color: var(--good); }
 
   .card-body { display: none; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
   .card.open .card-body { display: block; }
@@ -197,10 +198,11 @@ const $ = s => document.querySelector(s);
 const esc = s => { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; };
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
-// Posts that list an email address get an "✉ Apply" button (URL-only posts stay manual).
+// Prefills the "✉ Apply" compose modal's To field when a post lists an email address.
 // Handles literal addresses plus scraper-dodging forms: "nesra at roundlyhq.com",
 // "jobs [at] foo [dot] com". STOP_LOCAL keeps prose like "more info at example.com"
-// from matching; worst case the To field is editable anyway. Cached per job.
+// from matching. The Apply button itself doesn't depend on a match — worst case
+// the To field opens blank and he fills it in by hand. Cached per job.
 const STOP_LOCAL = new Set(["apply", "us", "info", "more", "available", "details", "here",
                             "team", "page", "website", "site", "online", "found", "work",
                             "role", "position", "openings", "listed", "posted", "live", "out"]);
@@ -285,8 +287,10 @@ Best,
 Evan`;
 }
 
-// Apply only makes sense before an application exists (and with an email to send to).
-const canApply = j => ["inbox", "interested", "later"].includes(j.status) && emailsIn(j).length > 0;
+// Apply only makes sense before an application exists. Detection can miss an
+// obfuscated address (e.g. bracket/brace wrapping); the button stays available
+// regardless — openApply() just leaves "To" blank for manual entry in that case.
+const canApply = j => ["inbox", "interested", "later"].includes(j.status);
 
 // ---- follow-up: email applications that have gone quiet ----
 // applied_at / reminded_at are unix seconds stamped server-side (db.py). A post is
@@ -473,7 +477,7 @@ function cardHTML(j, forceOpen = false) {
                 `<option value="${s}" ${j.status === s ? "selected" : ""}>${s}</option>`).join("")}
             </select>
           </label>
-          ${canApply(j) ? `<button class="apply-btn" title="Email an application, resume attached">✉ Apply</button>` : ""}
+          ${canApply(j) ? `<button class="apply-btn ${emailsIn(j).length ? "found" : ""}" title="Email an application, resume attached">✉ Apply</button>` : ""}
           ${followupDue(j) ? `<button class="remind-btn" title="Send a follow-up reminder, resume re-attached">↻ Send reminder</button>` : ""}
           <span class="saved">saved ✓</span>
         </div>

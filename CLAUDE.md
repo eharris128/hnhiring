@@ -24,11 +24,13 @@ the inline JS (extract the `<script>` block from `static/index.html`).
   applied_via=email, and appends an audit line to notes. `applied_via` ('email' =
   needs follow-up | 'portal' | NULL) is also set to 'portal' by the frontend when
   `+` bumps interested→applied.
-- `mailer.py` — Gmail SMTP (app password) with the resume PDF attached.
-  Credentials in `mail.json` (gitignored; see `mail.json.example`). Posts whose
-  text contains an email get an "✉ Apply" button (compose modal, prefilled
-  template; `a` key in zen mode). Email detection is frontend-only
-  (`emailsIn()` in index.html), nothing stored.
+- `mailer.py` — Gmail SMTP (app password) with the resume PDF attached. Credentials
+  in `mail.json` (gitignored; see `mail.json.example`). Every inbox/interested/later
+  post gets an "✉ Apply" button (compose modal, prefilled template; `a` key in zen
+  mode); the To field is prefilled when an email is found in the post text, else
+  left blank for manual entry (detection misses obfuscated forms sometimes — that's
+  fine, the button still opens). Email detection is frontend-only (`emailsIn()` in
+  index.html), nothing stored.
 - `hn.py` — resolves newest thread via Algolia (`author_whoishiring`), fetches
   story + all `kids` from Firebase (`/v0/item/<id>.json`), 50 concurrent.
   Fallback thread id is hardcoded; sync accepts `?thread_id=` for old months.
