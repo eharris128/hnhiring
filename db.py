@@ -7,6 +7,8 @@ import sqlite3
 import time
 from pathlib import Path
 
+import classify
+
 DB_PATH = Path(__file__).parent / "data.db"
 
 # Follow-up window, mirrored from the frontend's FOLLOWUP_DAYS (index.html). An emailed
@@ -29,7 +31,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     time      INTEGER,
     title     TEXT,                  -- first line of the post, plain text
     text      TEXT,                  -- full post, HN-sanitized HTML
-    tags      TEXT NOT NULL DEFAULT '[]'  -- JSON array from classify.py
+    tags      TEXT NOT NULL DEFAULT '[]',  -- JSON array from classify.py
+    company   TEXT                  -- normalized company name from classify.extract_company, or NULL
 );
 
 CREATE TABLE IF NOT EXISTS user_state (
@@ -62,6 +65,10 @@ def connect() -> sqlite3.Connection:
     if "applied_at" not in cols:
         conn.execute("ALTER TABLE user_state ADD COLUMN applied_at INTEGER")
         _backfill_applied_at(conn)
+    job_cols = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)")}
+    if "company" not in job_cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN company TEXT")
+        _backfill_company(conn)
     conn.commit()
     return conn
 
@@ -80,6 +87,15 @@ def _backfill_applied_at(conn: sqlite3.Connection) -> None:
         conn.execute("UPDATE user_state SET applied_at = ? WHERE job_id = ?", (ts, r["job_id"]))
 
 
+def _backfill_company(conn: sqlite3.Connection) -> None:
+    """Seed company for jobs synced before the column existed, so the auto-skip
+    matcher (see auto_skip_reapplied) works against past months without a resync."""
+    for r in conn.execute("SELECT id, title FROM jobs").fetchall():
+        company = classify.extract_company(r["title"] or "")
+        if company:
+            conn.execute("UPDATE jobs SET company = ? WHERE id = ?", (company, r["id"]))
+
+
 def upsert_jobs(conn: sqlite3.Connection, thread: dict, jobs: list[dict]) -> None:
     conn.execute(
         "INSERT INTO threads (id, title, time, last_synced) VALUES (?, ?, ?, ?) "
@@ -87,12 +103,39 @@ def upsert_jobs(conn: sqlite3.Connection, thread: dict, jobs: list[dict]) -> Non
         (thread["id"], thread.get("title"), thread.get("time"), int(time.time())),
     )
     conn.executemany(
-        "INSERT INTO jobs (id, thread_id, author, time, title, text, tags) "
-        "VALUES (:id, :thread_id, :author, :time, :title, :text, :tags) "
-        "ON CONFLICT(id) DO UPDATE SET title=excluded.title, text=excluded.text, tags=excluded.tags",
+        "INSERT INTO jobs (id, thread_id, author, time, title, text, tags, company) "
+        "VALUES (:id, :thread_id, :author, :time, :title, :text, :tags, :company) "
+        "ON CONFLICT(id) DO UPDATE SET title=excluded.title, text=excluded.text, "
+        "tags=excluded.tags, company=excluded.company",
         jobs,
     )
     conn.commit()
+
+
+def auto_skip_reapplied(conn: sqlite3.Connection) -> int:
+    """Auto-bucket untriaged jobs into status='skip' when their company already
+    rejected a non-email application from a past post. Only ever initializes jobs
+    with no user_state row yet, so it never touches anything already triaged —
+    user_state stays sacred. Returns the number of jobs skipped."""
+    rejected_companies = {
+        r["company"] for r in conn.execute(
+            "SELECT DISTINCT j.company FROM jobs j "
+            "JOIN user_state u ON u.job_id = j.id "
+            "WHERE u.status = 'rejected' AND u.applied_via = 'portal' AND j.company IS NOT NULL"
+        ).fetchall()
+    }
+    if not rejected_companies:
+        return 0
+    candidates = conn.execute(
+        "SELECT j.id, j.company FROM jobs j LEFT JOIN user_state u ON u.job_id = j.id "
+        "WHERE u.job_id IS NULL AND j.company IS NOT NULL"
+    ).fetchall()
+    skipped = 0
+    for r in candidates:
+        if r["company"] in rejected_companies:
+            update_user_state(conn, r["id"], {"status": "skip"})
+            skipped += 1
+    return skipped
 
 
 def list_jobs(conn: sqlite3.Connection, thread_id: int | None = None) -> list[dict]:

@@ -34,7 +34,7 @@ class ApplyRequest(BaseModel):
     kind: str = "application"  # 'application' (mark applied) | 'reminder' (follow-up nudge)
 
 
-STATUSES = {"inbox", "interested", "later", "applied", "interviewing", "offer", "rejected", "archived"}
+STATUSES = {"inbox", "interested", "later", "applied", "interviewing", "offer", "rejected", "archived", "skip"}
 
 
 @app.get("/")
@@ -78,7 +78,13 @@ async def sync(thread_id: int | None = None):
     conn = db.connect()
     try:
         db.upsert_jobs(conn, thread, jobs)
-        return {"thread_id": thread["id"], "title": thread.get("title"), "jobs": len(jobs)}
+        auto_skipped = db.auto_skip_reapplied(conn)
+        return {
+            "thread_id": thread["id"],
+            "title": thread.get("title"),
+            "jobs": len(jobs),
+            "auto_skipped": auto_skipped,
+        }
     finally:
         conn.close()
 

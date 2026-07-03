@@ -32,6 +32,44 @@ def first_line(plain: str, limit: int = 160) -> str:
     return line[:limit] + ("…" if len(line) > limit else "")
 
 
+# Most posts follow "Company | Role | Location | ..."; the first segment is the
+# company. Reject segments that look like a role/descriptor instead (posts that
+# omit the company name) so an unstructured title never masquerades as a company
+# and collides with an unrelated one under exact-match comparison.
+_NOT_A_COMPANY = re.compile(
+    r"\b(?:engineer|developer|programmer|scientist|manager|director|architect|"
+    r"designer|analyst|specialist|intern|founder|president|remote|onsite|"
+    r"on-site|hybrid|full-?time|part-?time|contract|freelance|senior|staff|"
+    r"principal|junior|lead|founding|multiple|various|roles?|positions?)\b",
+    re.I,
+)
+_LEGAL_SUFFIX = re.compile(
+    r"\s+(?:inc|llc|ltd|gmbh|ag|corp|co|pbc|plc|sa|limited|company)$"
+)
+
+
+def extract_company(title: str) -> str | None:
+    """Best-effort company name from a post's title, normalized for exact-match
+    comparison (lowercased, legal suffix stripped). None when the title doesn't
+    follow the "Company | ..." convention or its first segment isn't a company."""
+    if "|" not in title:
+        return None
+    first = title.split("|", 1)[0]
+    first = re.sub(r"\(.*?\)", "", first)
+    first = re.sub(r"https?://\S+", "", first)
+    first = first.strip()
+    if not first or _NOT_A_COMPANY.search(first):
+        return None
+    normalized = re.sub(r"[^a-z0-9]+", " ", first.lower()).strip()
+    while True:
+        stripped = _LEGAL_SUFFIX.sub("", normalized).strip()
+        if stripped == normalized:
+            break
+        normalized = stripped
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized if len(normalized) >= 2 else None
+
+
 _REMOTE = re.compile(r"\bremote\b", re.I)
 _NO_REMOTE = re.compile(r"\b(?:no|not|isn'?t)\s+remote\b|\bremote\s*:?\s*no\b", re.I)
 _ONSITE = re.compile(r"\bon-?site\b|\bhybrid\b|\bin[- ]office\b", re.I)

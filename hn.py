@@ -59,15 +59,17 @@ async def fetch_thread(thread_id: int | None = None) -> tuple[dict, list[dict]]:
         if not item or item.get("deleted") or item.get("dead") or not item.get("text"):
             continue
         text = item["text"]
+        title = classify.first_line(classify.to_plain(text))
         jobs.append(
             {
                 "id": item["id"],
                 "thread_id": thread_id,
                 "author": item.get("by", ""),
                 "time": item.get("time", 0),
-                "title": classify.first_line(classify.to_plain(text)),
+                "title": title,
                 "text": text,
                 "tags": json.dumps(classify.classify(text)),
+                "company": classify.extract_company(title),
             }
         )
     return thread, jobs

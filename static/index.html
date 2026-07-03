@@ -54,7 +54,7 @@
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
           padding: 14px 16px; margin-bottom: 12px; }
   .card.fav { border-left: 3px solid var(--star); }
-  .card.archived { opacity: .5; }
+  .card.archived, .card.skip { opacity: .5; }
   .card-head { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
   .card-title { flex: 1; font-weight: 600; font-size: 14.5px; }
   .acts { display: flex; gap: 2px; align-items: center; }
@@ -183,7 +183,7 @@
 <div id="toast" hidden></div>
 
 <script>
-const STATUSES = ["all", "inbox", "interested", "later", "applied", "interviewing", "offer", "rejected", "archived"];
+const STATUSES = ["all", "inbox", "interested", "later", "applied", "interviewing", "offer", "rejected", "archived", "skip"];
 // Cards are expanded by default; `closed` remembers ones the user collapsed.
 // Zen mode shows one card at a time from the current filtered list.
 const state = { jobs: [], threads: [], thread: null, threadId: null, q: "", filters: new Set(),
@@ -389,8 +389,9 @@ async function sync() {
   try {
     const r = await fetch("/api/sync", { method: "POST" });
     if (!r.ok) throw new Error(await r.text());
-    const { thread_id } = await r.json();  // the just-pulled month
+    const { thread_id, auto_skipped } = await r.json();  // the just-pulled month
     await load(thread_id);                 // switch to it + refresh the picker
+    if (auto_skipped) showToast(`${auto_skipped} auto-skipped — already rejected elsewhere`);
   } catch (e) {
     alert("Sync failed: " + e.message);
   } finally {
@@ -500,7 +501,7 @@ function followupPill(j) {
 
 function cardHTML(j, forceOpen = false) {
   return `
-    <div class="card ${j.favorite ? "fav" : ""} ${j.status === "archived" ? "archived" : ""} ${forceOpen || !state.closed.has(j.id) ? "open" : ""}" data-id="${j.id}">
+    <div class="card ${j.favorite ? "fav" : ""} ${j.status === "archived" ? "archived" : ""} ${j.status === "skip" ? "skip" : ""} ${forceOpen || !state.closed.has(j.id) ? "open" : ""}" data-id="${j.id}">
       <div class="card-head">
         <div style="flex:1">
           <div class="card-title">${esc(j.title)}</div>
