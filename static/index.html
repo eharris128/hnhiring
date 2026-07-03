@@ -97,6 +97,13 @@
   .saved.show { opacity: 1; }
   .empty { color: var(--dim); text-align: center; padding: 60px 0; }
 
+  #toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+           background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+           padding: 9px 16px; font-size: 13px; color: var(--text); z-index: 30;
+           opacity: 0; transition: opacity .25s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+  #toast[hidden] { display: none; }
+
   #apply-modal { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.55);
                  display: flex; align-items: stretch; justify-content: center; gap: 14px;
                  padding: 4vh 20px; }
@@ -173,12 +180,14 @@
   <div class="modal-job" id="apply-job"><!-- job details: right --></div>
 </div>
 
+<div id="toast" hidden></div>
+
 <script>
 const STATUSES = ["all", "inbox", "interested", "later", "applied", "interviewing", "offer", "rejected", "archived"];
 // Cards are expanded by default; `closed` remembers ones the user collapsed.
 // Zen mode shows one card at a time from the current filtered list.
 const state = { jobs: [], threads: [], thread: null, threadId: null, q: "", filters: new Set(),
-                tab: "all", closed: new Set(), zen: false, zenIdx: 0 };
+                tab: "all", closed: new Set(), zen: false, zenIdx: 0, lastChange: null };
 
 // + bumps a post one step along the review pipeline; "later" is a parking lot
 // that re-enters at interested.
@@ -368,6 +377,7 @@ async function load(threadId) {
 function switchMonth(id) {
   state.zenIdx = 0;
   state.closed.clear();
+  state.lastChange = null;  // undo doesn't cross months
   load(id);
 }
 
@@ -394,6 +404,46 @@ async function patch(id, fields) {
   });
   const j = state.jobs.find(j => j.id === id);
   Object.assign(j, fields);
+}
+
+let toastTimer = null;
+function showToast(msg) {
+  const el = $("#toast");
+  el.textContent = msg;
+  el.hidden = false;
+  requestAnimationFrame(() => el.classList.add("show"));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    el.classList.remove("show");
+    setTimeout(() => { el.hidden = true; }, 250);
+  }, 3000);
+}
+
+// Pile-moving actions (bump/archive/later/reject/status-select/apply) record the fields
+// they're about to overwrite so a single Ctrl+Z can put a mis-clicked card back. Only the
+// most recent one is kept — remembering more than one turn isn't needed yet.
+function pickFields(j, keys) {
+  const out = {};
+  for (const k of keys) out[k] = j[k] ?? null;
+  return out;
+}
+
+async function patchTracked(j, fields) {
+  const prev = pickFields(j, Object.keys(fields));
+  await patch(j.id, fields);
+  state.lastChange = { id: j.id, prev, title: titleParts(j)[0] || j.title };
+  showToast(`${state.lastChange.title} → ${j.status} · ctrl+z to undo`);
+}
+
+async function undo() {
+  const change = state.lastChange;
+  if (!change) return;
+  state.lastChange = null;  // single-level: no redo, no undoing the undo
+  const j = state.jobs.find(x => x.id === change.id);
+  if (!j) return;  // e.g. switched months since — nothing here to restore
+  await patch(j.id, change.prev);
+  render();
+  showToast(`Undid — "${change.title}" back to ${j.status}`);
 }
 
 function visible() {
@@ -505,7 +555,7 @@ function render() {
         <button id="zen-next" ${state.zenIdx >= jobs.length - 1 ? "disabled" : ""}>→</button>
         <span class="zen-keys">
           <kbd>←</kbd><kbd>→</kbd> move · <kbd>+</kbd> bump · <kbd>x</kbd> archive ·
-          <kbd>f</kbd> fav · <kbd>l</kbd> later · <kbd>r</kbd> reject · <kbd>a</kbd> apply/remind · <kbd>i</kbd> interested tab · <kbd>n</kbd> notes · <kbd>z</kbd>/<kbd>Esc</kbd> exit
+          <kbd>f</kbd> fav · <kbd>l</kbd> later · <kbd>r</kbd> reject · <kbd>a</kbd> apply/remind · <kbd>i</kbd> interested tab · <kbd>n</kbd> notes · <kbd>ctrl+z</kbd> undo · <kbd>z</kbd>/<kbd>Esc</kbd> exit
         </span>
       </div>` +
       (j ? cardHTML(j, true) : '<div class="empty">Nothing matches the current filters.</div>');
@@ -689,7 +739,7 @@ async function sendApply(test = false) {
   // deliver in the background; a failure rolls the status back.
   const pitch = $("#apply-pitch").value;
   const j = state.jobs.find(j => j.id === jobId);
-  const prevStatus = j.status, prevVia = j.applied_via;
+  const prevStatus = j.status, prevVia = j.applied_via, prevNotes = j.notes;
   j.status = "applied";
   j.applied_via = "email";
   closeApply();
@@ -698,7 +748,15 @@ async function sendApply(test = false) {
   try {
     const u = await post();
     Object.assign(j, { status: u.status, notes: u.notes, applied_via: u.applied_via });
+    // Wrong-pile insurance: the email already went out, but Ctrl+Z can still put the
+    // card's status/notes back the way they were before this send.
+    state.lastChange = {
+      id: jobId,
+      prev: { status: prevStatus, applied_via: prevVia ?? null, notes: prevNotes },
+      title: titleParts(j)[0] || j.title,
+    };
     render();
+    showToast(`Applied — "${state.lastChange.title}" · ctrl+z to undo`);
   } catch (e) {
     j.status = prevStatus;
     j.applied_via = prevVia;
@@ -745,11 +803,11 @@ $("#list").addEventListener("click", async e => {
   } else if (e.target.closest(".remind-btn")) {
     openReminder(j);
   } else if (e.target.closest(".act.plus")) {
-    await patch(id, bumpFields(j));
+    await patchTracked(j, bumpFields(j));
     zenStep(id);
     render();
   } else if (e.target.closest(".act.x")) {
-    await patch(id, { status: j.status === "archived" ? "inbox" : "archived" });
+    await patchTracked(j, { status: j.status === "archived" ? "inbox" : "archived" });
     zenStep(id);
     render();
   } else if (!state.zen && e.target.closest(".card-head") && !e.target.closest("a")) {
@@ -759,6 +817,14 @@ $("#list").addEventListener("click", async e => {
 });
 
 document.addEventListener("keydown", async e => {
+  // Ctrl/Cmd+Z undoes the last pile move (bump/archive/later/reject/apply), unless
+  // focus is in a text field — there it's left alone so native text-undo still works.
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "z") {
+    if (e.target.matches("input, textarea, select")) return;
+    e.preventDefault();
+    undo();
+    return;
+  }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target.matches("input, textarea, select")) {
     if (e.key === "Escape") e.target.blur();
@@ -782,18 +848,18 @@ document.addEventListener("keydown", async e => {
   } else if (!j) {
     return;
   } else if (e.key === "+" || e.key === "=") {
-    await patch(j.id, bumpFields(j));
+    await patchTracked(j, bumpFields(j));
     zenStep(j.id); render();
   } else if (e.key === "x") {
-    await patch(j.id, { status: j.status === "archived" ? "inbox" : "archived" });
+    await patchTracked(j, { status: j.status === "archived" ? "inbox" : "archived" });
     zenStep(j.id); render();
   } else if (e.key === "f") {
     await patch(j.id, { favorite: !j.favorite }); render();
   } else if (e.key === "l") {
-    await patch(j.id, { status: "later" });
+    await patchTracked(j, { status: "later" });
     zenStep(j.id); render();
   } else if (e.key === "r") {
-    await patch(j.id, { status: "rejected" });
+    await patchTracked(j, { status: "rejected" });
     zenStep(j.id); render();
   } else if (e.key === "a" && canApply(j)) {
     e.preventDefault();  // don't let the "a" keystroke type into the focused body
@@ -810,7 +876,8 @@ document.addEventListener("keydown", async e => {
 $("#list").addEventListener("change", async e => {
   const card = e.target.closest(".card");
   if (card && e.target.matches(".status-sel")) {
-    await patch(+card.dataset.id, { status: e.target.value });
+    const j = state.jobs.find(j => j.id === +card.dataset.id);
+    await patchTracked(j, { status: e.target.value });
     flashSaved(card); renderTabs();
   }
 });

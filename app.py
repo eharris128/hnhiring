@@ -138,7 +138,10 @@ def patch_job(job_id: int, patch: UserStatePatch):
         exists = conn.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone()
         if not exists:
             raise HTTPException(404, "unknown job id")
-        fields = patch.model_dump(exclude_none=True)
+        # exclude_unset (not exclude_none): lets a caller explicitly send applied_via:
+        # null to clear it (e.g. undoing a bump that set it) while still omitting fields
+        # it didn't mention at all.
+        fields = patch.model_dump(exclude_unset=True)
         return db.update_user_state(conn, job_id, fields)
     finally:
         conn.close()
