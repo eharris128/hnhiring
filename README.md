@@ -8,8 +8,8 @@ heuristics, and provides search, favorites, notes, and an application pipeline.
 
 ```sh
 cd ~/projects/hnhiring
-.venv/bin/uvicorn app:app --reload
-# open http://127.0.0.1:8000 and hit Sync
+.venv/bin/uvicorn app:app --reload --port 8137
+# open http://127.0.0.1:8137 and hit Sync
 ```
 
 (First-time setup: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`)
@@ -20,10 +20,10 @@ cd ~/projects/hnhiring
   in the header (newest selected by default).
 - Your favorites/notes/statuses live in `data.db` (gitignored, this machine only)
   and are never touched by sync — switching months never disturbs them.
-- Browsing is **per-month**, but if an emailed application goes quiet (past 7 days)
-  in a month you're *not* viewing, a **"↻ N due in other months"** nudge appears by
-  the picker — click it to jump to that month.
-- To pull a specific or older month: `curl -X POST 'localhost:8000/api/sync?thread_id=<hn story id>'`
+- Browsing is **per-month**. If an emailed application goes quiet (past 7 days) in a
+  month you're *not* viewing, that month's option in the picker carries a **`· ↻N`**
+  marker — open the picker now and then to catch them.
+- To pull a specific or older month: `curl -X POST 'localhost:8137/api/sync?thread_id=<hn story id>'`
   — it then shows up in the month picker alongside the others. (Handy for landing a
   second month locally to try the picker before the next month's thread is live.)
 - Sync also auto-files any untriaged post under **skip** if its company already
@@ -46,7 +46,7 @@ cd ~/projects/hnhiring
    | `a` | open the ✉ Apply compose modal (or, on an applied post past follow-up, a reminder nudge) |
    | `→` / `j`, `←` / `k` | next / previous |
    | `f` | favorite |
-   | `n` | jump to notes (`Esc` to jump back) |
+   | `n` | jump to notes (`Esc` to leave the notes field) |
    | `i` | jump to the Interested tab |
    | `z` / `Esc` | toggle Zen |
    | `Ctrl`/`Cmd`+`z` | undo the last pile move (single level) |

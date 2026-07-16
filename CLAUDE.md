@@ -24,7 +24,8 @@ the inline JS (extract the `<script>` block from `static/index.html`).
   /api/jobs/{id}/apply`, keyed by `kind`: `'application'` (default) emails the
   application via `mailer.py` (resume attached), then sets status=applied,
   applied_via=email, and appends an audit line to notes; `'reminder'` sends a
-  follow-up nudge and stamps `reminded_at` only, leaving status/channel/date alone.
+  follow-up nudge, appends a "↻ reminder sent" audit line to notes, and stamps
+  `reminded_at`, leaving status/channel/date alone.
   `test: true` redirects either kind to `mail.json`'s `test_address` with no state
   change. `applied_via` ('email' = needs follow-up | 'portal' | NULL) is also set
   to 'portal' by the frontend when `+` bumps interested→applied.
@@ -80,11 +81,14 @@ the inline JS (extract the `<script>` block from `static/index.html`).
 5. Zen mode (`z`) = one card at a time over the CURRENT filtered list, with
    keyboard triage (`+`/`x` auto-advance via `zenStep`). Keep new features
    working in both list and zen views — they share `cardHTML()`.
-6. Status-changing actions (bump/archive/later/reject/dropdown/apply) go through
+6. Status-changing actions (bump/archive/later/reject/dropdown) go through
    `patchTracked`, which stashes the overwritten fields in `state.lastChange` so
    Ctrl/Cmd+Z can revert the single most recent one (cleared on month switch —
-   undo never crosses months). A new status-changing action should call
-   `patchTracked`, not `patch`, to stay undoable.
+   undo never crosses months). Apply is the one exception: `sendApply` is
+   optimistic (flip the card, deliver in the background, roll back on failure),
+   so it builds `state.lastChange` by hand instead of calling `patchTracked` —
+   don't "simplify" it onto `patchTracked`. Any new status-changing action
+   should call `patchTracked`, not `patch`, to stay undoable.
 
 ## Workflow notes
 

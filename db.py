@@ -114,7 +114,7 @@ def upsert_jobs(conn: sqlite3.Connection, thread: dict, jobs: list[dict]) -> Non
 
 def auto_skip_reapplied(conn: sqlite3.Connection) -> int:
     """Auto-bucket untriaged jobs into status='skip' when their company already
-    rejected a non-email application from a past post. Only ever initializes jobs
+    rejected a portal application from a past post. Only ever initializes jobs
     with no user_state row yet, so it never touches anything already triaged —
     user_state stays sacred. Returns the number of jobs skipped."""
     rejected_companies = {
