@@ -8,11 +8,14 @@ heuristics, and provides search, favorites, notes, and an application pipeline.
 
 ```sh
 cd ~/projects/hnhiring
-.venv/bin/uvicorn app:app --reload --port 8137
+with-keys .venv/bin/uvicorn app:app --reload --port 8137
 # open http://127.0.0.1:8137 and hit Sync
 ```
 
 (First-time setup: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`)
+
+`with-keys` injects the Gmail app password from Bitwarden (`api/google-app-password`)
+as `$GMAIL_APP_PASSWORD`; plain `uvicorn` works too, only ✉ Apply stops sending.
 
 - **Sync** auto-discovers the newest "Who is hiring?" thread — on the 1st of the
   month it picks up the new thread automatically and switches the view to it.
@@ -80,7 +83,8 @@ plus `later` (parking lot) and `skip` (auto-filed re-postings, see above).
   `skip` when their company already rejected a portal application in a past
   month.
 - `mailer.py` — sends the ✉ Apply emails through Gmail SMTP (resume PDF
-  attached; credentials in `mail.json`, gitignored — see `mail.json.example`).
+  attached). Sender/resume/test address in `mail.json`, gitignored — see
+  `mail.json.example`; the app password comes from `$GMAIL_APP_PASSWORD`.
 - `app.py` — FastAPI: `POST /api/sync`, `GET /api/jobs` (optional `?thread_id=`),
   `GET /api/threads` (the months, for the picker), `PATCH /api/jobs/{id}`,
   `POST /api/jobs/{id}/apply` (send an application, or with `kind: "reminder"`,

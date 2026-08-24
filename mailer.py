@@ -1,13 +1,16 @@
 """Send job-application emails through Gmail SMTP, resume always attached.
 
-Credentials live in mail.json (gitignored — see mail.json.example). Gmail
-requires an app password (https://myaccount.google.com/apppasswords), not the
-account password. Mail sent this way still lands in the Gmail Sent folder.
+Config lives in mail.json (gitignored — see mail.json.example). The app
+password itself comes from $GMAIL_APP_PASSWORD, injected from Bitwarden by
+`with-keys` (mail.json may also carry it, but env wins). Gmail requires an app
+password (https://myaccount.google.com/apppasswords), not the account password.
+Mail sent this way still lands in the Gmail Sent folder.
 """
 
 import html
 import json
 import mimetypes
+import os
 import re
 import smtplib
 from email.message import EmailMessage
@@ -40,14 +43,19 @@ def _to_html(body: str) -> str:
 
 
 class MailConfigError(Exception):
-    """mail.json missing/incomplete, or the resume file is gone."""
+    """Config missing/incomplete, or the resume file is gone."""
 
 
 def load_config() -> dict:
     if not CONFIG_PATH.exists():
         raise MailConfigError("mail.json not found — copy mail.json.example and fill it in")
     cfg = json.loads(CONFIG_PATH.read_text())
-    missing = [k for k in ("address", "app_password", "resume") if not cfg.get(k)]
+    if os.environ.get("GMAIL_APP_PASSWORD"):
+        cfg["app_password"] = os.environ["GMAIL_APP_PASSWORD"]
+    elif not cfg.get("app_password"):
+        raise MailConfigError(
+            "no app password — run under `with-keys` so $GMAIL_APP_PASSWORD is set")
+    missing = [k for k in ("address", "resume") if not cfg.get(k)]
     if missing:
         raise MailConfigError(f"mail.json is missing: {', '.join(missing)}")
     cfg["resume"] = Path(cfg["resume"]).expanduser()
@@ -72,5 +80,6 @@ def send_application(to: str, subject: str, body: str) -> None:
                        filename=resume.name)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-        smtp.login(cfg["address"], cfg["app_password"])
+        # Gmail shows app passwords in four spaced groups; strip for login.
+        smtp.login(cfg["address"], cfg["app_password"].replace(" ", ""))
         smtp.send_message(msg)

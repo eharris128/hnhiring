@@ -7,7 +7,7 @@ to him: remote roles, US-basis roles, roles compatible with his Swiss work permi
 ## Run / verify
 
 ```sh
-.venv/bin/uvicorn app:app --reload --port 8137   # http://127.0.0.1:8137
+with-keys .venv/bin/uvicorn app:app --reload --port 8137   # http://127.0.0.1:8137
 ```
 
 No test suite. Verify changes with curl against the API and `node --check` on
@@ -29,13 +29,17 @@ the inline JS (extract the `<script>` block from `static/index.html`).
   `test: true` redirects either kind to `mail.json`'s `test_address` with no state
   change. `applied_via` ('email' = needs follow-up | 'portal' | NULL) is also set
   to 'portal' by the frontend when `+` bumps interested→applied.
-- `mailer.py` — Gmail SMTP (app password) with the resume PDF attached. Credentials
-  in `mail.json` (gitignored; see `mail.json.example`). Every inbox/interested/later
-  post gets an "✉ Apply" button (compose modal, prefilled template; `a` key in zen
-  mode); the To field is prefilled when an email is found in the post text, else
-  left blank for manual entry (detection misses obfuscated forms sometimes — that's
-  fine, the button still opens). Email detection is frontend-only (`emailsIn()` in
-  index.html), nothing stored.
+- `mailer.py` — Gmail SMTP (app password) with the resume PDF attached. Sender
+  name/address, resume path and `test_address` live in `mail.json` (gitignored;
+  see `mail.json.example`). The app password itself is NOT in that file — it
+  comes from `$GMAIL_APP_PASSWORD`, injected from Bitwarden
+  (`api/google-app-password`) by `with-keys`, so launch the server as
+  `with-keys .venv/bin/uvicorn ...`. `load_config` prefers env over mail.json.
+  Every inbox/interested/later post gets an "✉ Apply" button (compose modal,
+  prefilled template; `a` key in zen mode); the To field is prefilled when an
+  email is found in the post text, else left blank for manual entry (detection
+  misses obfuscated forms sometimes — that's fine, the button still opens).
+  Email detection is frontend-only (`emailsIn()` in index.html), nothing stored.
 - `hn.py` — resolves newest thread via Algolia (`author_whoishiring`), fetches
   story + all `kids` from Firebase (`/v0/item/<id>.json`), 50 concurrent.
   Fallback thread id is hardcoded; sync accepts `?thread_id=` for old months.

@@ -112,7 +112,9 @@ def apply(job_id: int, req: ApplyRequest):
         except mailer.MailConfigError as e:
             raise HTTPException(503, str(e))
         except smtplib.SMTPAuthenticationError:
-            raise HTTPException(502, "Gmail rejected the login — check app_password in mail.json")
+            raise HTTPException(
+                502, "Gmail rejected the login — $GMAIL_APP_PASSWORD may be stale; "
+                     "regenerate at myaccount.google.com/apppasswords")
         except (smtplib.SMTPException, OSError) as e:
             raise HTTPException(502, f"send failed: {e}")
         if req.test:
