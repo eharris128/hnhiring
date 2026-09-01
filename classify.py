@@ -5,17 +5,20 @@ Tags emitted:
     onsite       — onsite/hybrid presence mentioned
     us           — US-located or US-restricted
     europe       — Europe/EU/EMEA-located or -eligible
-    switzerland  — Swiss location mentioned
+    home         — a place from profile.json's home.places is mentioned
     worldwide    — explicitly global remote
 
 The UI derives the user-facing filters:
     Remote          = remote
     US-based        = us
-    Swiss-friendly  = switzerland OR (remote AND (europe OR worldwide))
+    Home-friendly   = home OR (remote AND any of home.friendly_remote_tags)
 """
 
+import functools
 import html
 import re
+
+import profile
 
 # Strip HN's HTML so heuristics see plain text. <p> becomes a newline so the
 # first line of the post can serve as a title.
@@ -90,10 +93,22 @@ _US_PLACES = re.compile(
     re.I,
 )
 
-_SWISS = re.compile(
-    r"\bswitzerland\b|\bswiss\b|\bz[üu]rich\b|\bgeneva\b|\bgen[èe]ve\b|\blausanne\b|\bbasel\b|\bbern\b|\bzug\b",
-    re.I,
-)
+
+
+@functools.lru_cache(maxsize=4)
+def _home_re(places: tuple[str, ...]) -> re.Pattern | None:
+    """Whole-word, case-insensitive alternation of the profile's home places. Plain
+    words, not regexes — list spelling variants ("zürich", "zurich") separately. The
+    \b boundaries matter: "baseline" must not match "basel". Cached per distinct
+    place list so a sync of ~270 posts compiles it once."""
+    if not places:
+        return None
+    return re.compile(r"\b(?:" + "|".join(re.escape(p) for p in places) + r")\b", re.I)
+
+
+def home_re() -> re.Pattern | None:
+    return _home_re(tuple(p.strip().lower() for p in profile.load()["home"]["places"] if p.strip()))
+
 _EUROPE = re.compile(
     r"\beurope(?:an)?\b|\bemea\b|\bcet\b|\bcest\b|\beu\b"
     r"|remote\s*\(\s*(?:eu|europe)[^)]*\)",
@@ -116,8 +131,9 @@ def classify(text_html: str) -> list[str]:
         tags.append("us")
     if _EUROPE.search(plain):
         tags.append("europe")
-    if _SWISS.search(plain):
-        tags.append("switzerland")
+    home = home_re()
+    if home and home.search(plain):
+        tags.append("home")
     if _WORLDWIDE.search(plain):
         tags.append("worldwide")
     return tags

@@ -1,0 +1,26 @@
+{
+  "name": "Your Name",
+  "signature": "Your First Name",
+  "address": "your.personal@gmail.com",
+  "resume": "~/Documents/resume.pdf",
+  "test_address": "you+test@example.com",
+  "website": "https://example.com/",
+  "followup_days": 7,
+  "home": {
+    "label": "Switzerland",
+    "friendly_label": "Swiss-friendly",
+    "places": ["switzerland", "swiss", "zürich", "zurich", "geneva", "genève", "geneve",
+               "lausanne", "basel", "bern", "zug"],
+    "friendly_remote_tags": ["europe", "worldwide"]
+  },
+  "pitches": {
+    "general": {
+      "label": "General",
+      "text": "[EDIT ME] Two or three sentences on what you do and why this role fits."
+    },
+    "specialty": {
+      "label": "Specialty",
+      "text": "[EDIT ME] A second angle — a domain, a stack, a research interest — so you can pick the pitch per company."
+    }
+  }
+}

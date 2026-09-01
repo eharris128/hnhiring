@@ -14,6 +14,7 @@ from pydantic import BaseModel
 import db
 import hn
 import mailer
+import profile
 
 app = FastAPI(title="hnhiring")
 STATIC = Path(__file__).parent / "static"
@@ -30,7 +31,7 @@ class ApplyRequest(BaseModel):
     to: str
     subject: str
     body: str
-    test: bool = False  # send to mail.json's test_address instead; no state change
+    test: bool = False  # send to profile.json's test_address instead; no state change
     kind: str = "application"  # 'application' (mark applied) | 'reminder' (follow-up nudge)
 
 
@@ -72,6 +73,13 @@ def get_threads():
         conn.close()
 
 
+@app.get("/api/profile")
+def get_profile():
+    """The frontend's slice of profile.json: signature/website for the templates, the
+    pitches, followup_days, and the home region. Never the address or resume path."""
+    return profile.public()
+
+
 @app.post("/api/sync")
 async def sync(thread_id: int | None = None):
     thread, jobs = await hn.fetch_thread(thread_id)
@@ -106,7 +114,7 @@ def apply(job_id: int, req: ApplyRequest):
             if req.test:
                 to = mailer.load_config().get("test_address")
                 if not to:
-                    raise mailer.MailConfigError("add test_address to mail.json")
+                    raise mailer.MailConfigError("add test_address to profile.json")
                 subject = f"[TEST] {req.subject}"
             mailer.send_application(to, subject, req.body)
         except mailer.MailConfigError as e:

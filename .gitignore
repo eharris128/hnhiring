@@ -1,8 +1,8 @@
 # personal application state (favorites, notes, statuses)
 data.db
 
-# gmail credentials for the apply-by-email button
-mail.json
+# your profile: sender address, resume path, pitches, home region
+profile.json
 
 .venv/
 __pycache__/

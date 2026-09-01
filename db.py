@@ -8,13 +8,9 @@ import time
 from pathlib import Path
 
 import classify
+import profile
 
 DB_PATH = Path(__file__).parent / "data.db"
-
-# Follow-up window, mirrored from the frontend's FOLLOWUP_DAYS (index.html). An emailed
-# application that has sat in 'applied' this many days with no reminder is "due". Used by
-# list_threads to surface a cross-month follow-up cue on the picker. KEEP THESE EQUAL.
-FOLLOWUP_DAYS = 7
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS threads (
@@ -201,10 +197,11 @@ def get_thread(conn: sqlite3.Connection, thread_id: int) -> dict | None:
 def list_threads(conn: sqlite3.Connection) -> list[dict]:
     """Every synced month, newest first, with two per-month counts: job_count, and
     followup_due — emailed applications past the follow-up window with no reminder yet
-    (the same predicate the frontend's followupDue uses). followup_due drives the
-    picker's cross-month cue so per-month browsing doesn't strand post-rollover nudges.
+    (the same predicate the frontend's followupDue uses; both read followup_days from
+    the profile, so there is one source of truth). followup_due drives the picker's
+    cross-month cue so per-month browsing doesn't strand post-rollover nudges.
     LEFT JOINs so a thread with zero kept posts still appears (both counts 0)."""
-    cutoff = int(time.time()) - FOLLOWUP_DAYS * 86400
+    cutoff = int(time.time()) - profile.load()["followup_days"] * 86400
     rows = conn.execute(
         """SELECT t.*, COUNT(j.id) AS job_count,
                   COALESCE(SUM(CASE WHEN u.status = 'applied' AND u.applied_via = 'email'

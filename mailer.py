@@ -1,14 +1,13 @@
 """Send job-application emails through Gmail SMTP, resume always attached.
 
-Config lives in mail.json (gitignored — see mail.json.example). The app
-password itself comes from $GMAIL_APP_PASSWORD, injected from Bitwarden by
-`with-keys` (mail.json may also carry it, but env wins). Gmail requires an app
+Sender name/address, resume path and test address come from profile.json (see
+profile.py). The app password itself comes from $GMAIL_APP_PASSWORD, injected from
+Bitwarden by `with-keys` (profile.json may also carry it, but env wins). Gmail requires an app
 password (https://myaccount.google.com/apppasswords), not the account password.
 Mail sent this way still lands in the Gmail Sent folder.
 """
 
 import html
-import json
 import mimetypes
 import os
 import re
@@ -17,7 +16,7 @@ from email.message import EmailMessage
 from email.utils import formataddr
 from pathlib import Path
 
-CONFIG_PATH = Path(__file__).parent / "mail.json"
+import profile
 
 # Markdown-style [text](url) in the compose body becomes a hyperlink in the
 # HTML part and "text (url)" in the plain-text fallback.
@@ -47,9 +46,11 @@ class MailConfigError(Exception):
 
 
 def load_config() -> dict:
-    if not CONFIG_PATH.exists():
-        raise MailConfigError("mail.json not found — copy mail.json.example and fill it in")
-    cfg = json.loads(CONFIG_PATH.read_text())
+    """The profile, validated for sending: address + resume present, resume on disk,
+    app password available. A shallow copy — profile.load() is cached."""
+    if not profile.exists():
+        raise MailConfigError("profile.json not found — copy profile.json.example and fill it in")
+    cfg = dict(profile.load())
     if os.environ.get("GMAIL_APP_PASSWORD"):
         cfg["app_password"] = os.environ["GMAIL_APP_PASSWORD"]
     elif not cfg.get("app_password"):
@@ -57,7 +58,7 @@ def load_config() -> dict:
             "no app password — run under `with-keys` so $GMAIL_APP_PASSWORD is set")
     missing = [k for k in ("address", "resume") if not cfg.get(k)]
     if missing:
-        raise MailConfigError(f"mail.json is missing: {', '.join(missing)}")
+        raise MailConfigError(f"profile.json is missing: {', '.join(missing)}")
     cfg["resume"] = Path(cfg["resume"]).expanduser()
     if not cfg["resume"].exists():
         raise MailConfigError(f"resume not found at {cfg['resume']}")
@@ -67,7 +68,7 @@ def load_config() -> dict:
 def send_application(to: str, subject: str, body: str) -> None:
     cfg = load_config()
     msg = EmailMessage()
-    msg["From"] = formataddr((cfg.get("name", "Evan Harris"), cfg["address"]))
+    msg["From"] = formataddr((cfg["name"], cfg["address"])) if cfg["name"] else cfg["address"]
     msg["To"] = to
     msg["Subject"] = subject
     msg.set_content(_to_plain(body))
